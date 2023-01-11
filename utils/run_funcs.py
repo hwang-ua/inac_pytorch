@@ -5,8 +5,6 @@ os.environ['D4RL_SUPPRESS_IMPORT_ERROR'] = '1'
 import gym
 import d4rl
 
-EARLYCUTOFF = "EarlyCutOff"
-
 def load_testset(env_name, dataset, id):
     if env_name == 'HalfCheetah':
         if dataset == 'expert':
