@@ -7,7 +7,6 @@ from torch.distributions import Categorical
 
 from core.network import network_utils, network_bodies
 from core.utils import torch_utils
-import core.network.representation as representation
 
 
 class MLPCont(nn.Module):
@@ -169,38 +168,3 @@ class MLPDiscrete(nn.Module):
         logp_pi = m.log_prob(actions)
         return logp_pi
     
-
-# class PolicyFactory:
-#     @classmethod
-#     def get_policy_fn(cls, cfg):
-#         # if cfg.policy_fn_config['policy_type'] == "gaussian":
-#         #     return lambda: GaussianPolicy(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
-#         #                                   cfg.policy_fn_config['hidden_units'],
-#         #                                   cfg.action_dim, action_space=cfg.action_range)
-#         if cfg.policy_fn_config['policy_type'] == "policy-cont":
-#             if cfg.action_range == 1:
-#                 action_space = None
-#             else:
-#                 action_space = {"low": -cfg.action_range, "high": cfg.action_range}
-#             # return lambda: GaussianPolicy(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
-#             #                            cfg.action_dim, cfg.policy_fn_config['hidden_units'],
-#             #                            action_space=action_space,
-#             #                            rep=cfg.rep_fn,
-#             #                            init_type=cfg.policy_fn_config.get('init_type', 'xavier'),
-#             #                            )
-#             return lambda: AwacMLPCont(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
-#                                        cfg.action_dim, cfg.policy_fn_config['hidden_units'],
-#                                        action_range=cfg.action_range,
-#                                        rep=cfg.rep_fn,
-#                                        init_type=cfg.policy_fn_config.get('init_type', 'xavier'),
-#                                        info=cfg.policy_fn_config.get('info', None),
-#                                        )
-#         elif cfg.policy_fn_config['policy_type'] == 'policy-discrete':
-#             return lambda: AwacMLPDiscrete(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
-#                                            cfg.action_dim, cfg.policy_fn_config['hidden_units'],
-#                                            rep=cfg.rep_fn,
-#                                            init_type=cfg.policy_fn_config.get('init_type', 'xavier'),
-#                                            info=cfg.policy_fn_config.get('info', None),
-#                                            )
-#         else:
-#             raise NotImplementedError
