@@ -13,7 +13,8 @@ class HalfCheetah:
         random_seed(seed)
         self.state_dim = (17,)
         self.action_dim = 6
-        self.env = gym.make('halfcheetah-expert-v2') # use online environment from d4rl
+        # self.env = gym.make('HalfCheetah-v2')
+        self.env = gym.make('halfcheetah-expert-v2')
         self.env.unwrapped.seed(seed)
         self.env._max_episode_steps = np.inf # control timeout setting in agent
         self.state = None

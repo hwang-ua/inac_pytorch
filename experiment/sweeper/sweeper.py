@@ -67,3 +67,9 @@ class Sweeper(object):
             param_setting[param] = values[int(idx/cumulative) % num_values]
             cumulative *= num_values
         return param_setting
+
+
+if __name__ == '__main__':
+    sweeper = Sweeper("archive/lunar_lander/sweepv0_6a.json")
+    cfg = sweeper.parse(28)
+    print(cfg)

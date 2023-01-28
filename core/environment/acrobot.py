@@ -4,17 +4,9 @@ import numpy as np
 import gym
 import copy
 
+import core.utils.helpers
 from core.utils.torch_utils import random_seed
 
-def arcradians(cos, sin):
-    if cos > 0 and sin > 0:
-        return np.arccos(cos)
-    elif cos > 0 and sin < 0:
-        return np.arcsin(sin)
-    elif cos < 0 and sin > 0:
-        return np.arccos(cos)
-    elif cos < 0 and sin < 0:
-        return -1 * np.arccos(cos)
 
 class Acrobot:
     def __init__(self, seed=np.random.randint(int(1e5))):
@@ -59,8 +51,8 @@ class Acrobot:
         # acos1 = np.arccos(current_s[2])
         # asin1 = np.arcsin(current_s[3])
         
-        env.state = np.array([arcradians(current_s[0], current_s[1]),
-                              arcradians(current_s[2], current_s[3]),
+        env.state = np.array([core.utils.helpers.arcradians(current_s[0], current_s[1]),
+                              core.utils.helpers.arcradians(current_s[2], current_s[3]),
                               current_s[4],
                               current_s[5]])
         # print(env.state)
