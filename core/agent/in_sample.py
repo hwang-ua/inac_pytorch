@@ -9,17 +9,55 @@ from collections import namedtuple
 import os
 import torch
 
+from core.network.policy_factory import MLPCont, MLPDiscrete
+from core.network.network_architectures import DoubleCriticNetwork, DoubleCriticDiscrete, FCNetwork
+
 class InSampleACOnline(base.Agent):
     def __init__(self, cfg):
         super(InSampleACOnline, self).__init__(cfg)
         self.cfg = cfg
-        q1q2 = cfg.critic_fn()
-        pi = cfg.policy_fn()
+        
+        def get_policy_func():
+            if cfg.policy_fn_config['policy_type'] == "policy-cont":
+                pi = MLPCont(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
+                                           cfg.action_dim, cfg.policy_fn_config['hidden_units'],
+                                           action_range=cfg.action_range,
+                                           rep=None,
+                                           init_type='xavier',
+                                           info=cfg.policy_fn_config.get('info', None),
+                                           )
+            elif cfg.policy_fn_config['policy_type'] == 'policy-discrete':
+                pi = MLPDiscrete(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
+                                               cfg.action_dim, cfg.policy_fn_config['hidden_units'],
+                                               rep=None,
+                                               init_type='xavier',
+                                               info=cfg.policy_fn_config.get('info', None),
+                                               )
+            return pi
+
+        def get_critic_func():
+            if cfg.critic_fn_config['network_type'] == 'fc':
+                q1q2 = DoubleCriticDiscrete(cfg.device, np.prod(cfg.critic_fn_config['in_dim']),
+                                                                          cfg.critic_fn_config['hidden_units'],
+                                                                          cfg.critic_fn_config.get('out_dim', cfg.action_dim),
+                                                                          rep=None,
+                                                                          init_type=cfg.critic_fn_config.get('init_type', 'xavier'),
+                                                                          info=cfg.critic_fn_config.get('info', None),
+                                                                          )
+            elif cfg.critic_fn_config['network_type'] == 'fc-insert-input':
+                q1q2 = DoubleCriticNetwork(cfg.device, np.prod(cfg.critic_fn_config['in_dim']), cfg.action_dim,
+                                                                         cfg.critic_fn_config['hidden_units'],
+                                                                         rep=None)
+            return q1q2
+        
+        
+        pi = get_policy_func()
+        q1q2 = get_critic_func()
         AC = namedtuple('AC', ['q1q2', 'pi'])
         self.ac = AC(q1q2=q1q2, pi=pi)
 
-        q1q2_target = cfg.critic_fn()
-        pi_target = cfg.policy_fn()
+        pi_target = get_policy_func()
+        q1q2_target = get_critic_func()
         q1q2_target.load_state_dict(q1q2.state_dict())
         pi_target.load_state_dict(pi.state_dict())
         ACTarg = namedtuple('ACTarg', ['q1q2', 'pi'])
@@ -42,23 +80,28 @@ class InSampleACOnline(base.Agent):
         else:
             self.get_q_value = self.get_q_value_cont
             self.get_q_value_target = self.get_q_value_target_cont
-
-        if cfg.agent_name == 'InSampleACOnline' and cfg.load_offline_data:
-            self.fill_offline_data_to_buffer()
         
         self.tau = cfg.tau
-        self.value_net = cfg.state_value_fn()
+        self.value_net = FCNetwork(cfg.device, np.prod(cfg.val_fn_config['in_dim']),
+                                        cfg.val_fn_config['hidden_units'], 1,
+                                        rep=None,
+                                        init_type='xavier',
+                                        info=cfg.val_fn_config.get('info', None)
+                                        )
         if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
             self.load_state_value_fn(cfg.val_fn_config['path'])
 
         self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), cfg.learning_rate)
-        self.beh_pi = cfg.policy_fn()
+        self.beh_pi = get_policy_func()
         self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
 
         self.clip_grad_param = cfg.clip_grad_param
         self.exp_threshold = cfg.exp_threshold
         # self.beta_threshold = 1e-3
-        
+
+        if cfg.agent_name == 'InSampleACOnline' and cfg.load_offline_data:
+            self.fill_offline_data_to_buffer()
+
     def get_q_value_discrete(self, o, a, with_grad=False):
         if with_grad:
             q1_pi, q2_pi = self.ac.q1q2(o)

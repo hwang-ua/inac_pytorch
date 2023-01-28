@@ -595,9 +595,8 @@ class InSampleConfig(AWACOfflineConfig):
         attrs = dict(self.__dict__)
         for k in ['logger', 'replay_fn',
                   '_Config__env_fn', 'state_normalizer',
-                  'reward_normalizer', 'policy_fn', 'critic_fn', 'state_value_fn', 'rep_fn',
-                  'policy_optimizer_fn', 'critic_optimizer_fn', 'alpha_optimizer_fn', 'vs_optimizer_fn',
-                  'offline_data', 'tester_fn', 'eval_data']:
+                  'reward_normalizer',
+                  'offline_data', 'eval_data']:
             del attrs[k]
         return attrs
 
