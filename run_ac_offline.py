@@ -2,17 +2,9 @@ import os
 import argparse
 
 import core.environment.env_factory as environment
-import core.agent.agent_factory as agent
-import core.network.net_factory as network
-import core.network.policy_factory as policy
-import core.network.optimizer as optimizer
-import core.network.activations as activations
-import core.component.replay as replay
-import core.component.constraint as constraint
-import core.utils.normalizer as normalizer
-from core.utils import torch_utils, schedule, logger, run_funcs, format_path
-import core.utils.testers as tester
+from core.utils import torch_utils, logger, run_funcs
 from experiment.sweeper.sweeper import Sweeper
+from core.agent.in_sample import *
 
 
 if __name__ == '__main__':
@@ -26,7 +18,7 @@ if __name__ == '__main__':
 
     project_root = os.path.abspath(os.path.dirname(__file__))
     cfg = Sweeper(project_root, args.config_file).parse(args.id)
-    cfg.device = torch_utils.select_device(args.device)
+    # cfg.device = torch_utils.select_device(args.device)
     torch_utils.random_seed(cfg.seed)
 
     cfg.env_fn = environment.EnvFactory.create_env_fn(cfg)
@@ -37,5 +29,5 @@ if __name__ == '__main__':
     cfg.log_config()
 
     # Initializing the agent and running the experiment
-    agent_obj = agent.AgentFactory.create_agent_fn(cfg)()
+    agent_obj = InSampleAC(cfg)
     run_funcs.run_steps(agent_obj, cfg.max_steps, cfg.log_interval)

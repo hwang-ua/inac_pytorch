@@ -1,10 +1,5 @@
-import copy
 import numpy as np
-from sklearn.mixture import GaussianMixture
 from core.agent import base
-import core.network.net_factory as network
-import core.network.activations as activations
-import core.utils.torch_utils as torch_utils
 from collections import namedtuple
 import os
 import torch
