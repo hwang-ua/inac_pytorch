@@ -59,4 +59,4 @@ if __name__ == '__main__':
 
     # Initializing the agent and running the experiment
     agent_obj = agent.AgentFactory.create_agent_fn(cfg)()
-    run_funcs.run_steps(agent_obj)
+    run_funcs.run_steps(agent_obj, cfg.max_steps, cfg.log_interval)

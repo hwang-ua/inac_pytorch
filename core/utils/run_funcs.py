@@ -137,62 +137,20 @@ def load_true_values(cfg):
     else:
         return {}
 
-def run_steps(agent):
+def run_steps(agent, max_steps, log_interval):
     # valuesets = load_true_values(agent.cfg)
     t0 = time.time()
     transitions = []
     agent.populate_returns(initialize=True)
-    agent.random_fill_buffer(agent.cfg.warm_up_step)
-    loss_log = {}
-    if agent.cfg.debug:
-        for key in agent.cfg.debug:
-            loss_log[key] = []
+    # agent.random_fill_buffer(agent.cfg.warm_up_step)
     while True:
-        if agent.cfg.log_interval and not agent.total_steps % agent.cfg.log_interval:
-            if agent.cfg.tensorboard_logs: agent.log_tensorboard()
-            mean, median, min, max = agent.log_file(elapsed_time=agent.cfg.log_interval / (time.time() - t0), test=(not agent.total_steps % agent.cfg.eval_interval))
+        if log_interval and not agent.total_steps % log_interval:
+            agent.log_file(elapsed_time=log_interval / (time.time() - t0), test=True)
             t0 = time.time()
-            
-            if agent.cfg.debug:
-                pth = agent.cfg.get_data_dir()
-                with open(pth+'/loss_log.pkl', 'wb') as f:
-                    pickle.dump(loss_log, f)
-        # if agent.cfg.eval_interval and not agent.total_steps % agent.cfg.eval_interval:
-        #     if agent.cfg.visualize and agent.total_steps > 1:
-        #         agent.visualize()
-        #     if agent.cfg.evaluate_action_value and agent.total_steps > 1:
-        #         agent.draw_action_value()
-        #     if agent.cfg.evaluate_overestimation:
-        #         agent.log_overestimation()
-        #         # agent.log_overestimation_current_pi()
-        #     if agent.cfg.evaluate_rep_rank:
-        #         agent.log_rep_rank()
-        #     agent.reset_population_flag() # Done evaluation, regenerate data next time
-        #     # t0 = time.time()
-        # if agent.cfg.save_params and agent.total_steps == agent.cfg.early_save:
-        #     agent.save(early=True)
-        if agent.cfg.max_steps and agent.total_steps >= agent.cfg.max_steps:
+        if max_steps and agent.total_steps >= max_steps:
             break
-
-        seq, loss_dict = agent.step()
-        if agent.cfg.debug:
-            # print(loss_dict)
-            for key in agent.cfg.debug:
-                loss_log[key].append(loss_dict[key])
-        
-        if agent.cfg.early_cut_off and seq == EARLYCUTOFF:
-            break
-
-        if agent.cfg.log_observations:
-            transitions.append(copy.deepcopy(seq))
-
-    if agent.cfg.save_params:
-        agent.save()
-
-    if agent.cfg.log_observations:
-        data_dir = agent.cfg.get_data_dir()
-        with open(os.path.join(data_dir, 'transition.pkl'), 'wb') as f:
-            pickle.dump(transitions, f)
+        agent.step()
+    agent.save()
 
 
 def value_iteration(env, gamma):

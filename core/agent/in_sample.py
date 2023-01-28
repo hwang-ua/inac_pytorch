@@ -12,6 +12,7 @@ import torch
 class InSampleACOnline(base.Agent):
     def __init__(self, cfg):
         super(InSampleACOnline, self).__init__(cfg)
+        self.cfg = cfg
         q1q2 = cfg.critic_fn()
         pi = cfg.policy_fn()
         AC = namedtuple('AC', ['q1q2', 'pi'])
