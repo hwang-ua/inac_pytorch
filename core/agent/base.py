@@ -447,35 +447,7 @@ class Agent:
     def training_set_construction(self, data_dict, value_predictor=None):
         if value_predictor is None:
             value_predictor = self.default_value_predictor()
-            
-        # states = []
-        # actions = []
-        # rewards = []
-        # next_states = []
-        # terminations = []
-        # next_actions = []
-        # qmaxs = []
-        #
-        # for name in data_dict:
-        #     states.append(data_dict[name]['states'])
-        #     actions.append(data_dict[name]['actions'])
-        #     rewards.append(data_dict[name]['rewards'])
-        #     next_states.append(data_dict[name]['next_states'])
-        #     terminations.append(data_dict[name]['terminations'])
-        #     # print(data_dict[name]['actions'])
-        #     # print(data_dict[name]['actions'].shape)
-        #     # exit()
-        #     next_actions.append(np.concatenate([data_dict[name]['actions'][1:], data_dict[name]['actions'][-1:]]))  # Should not be used when using the current estimation in target construction
-        #     if 'qmax' in data_dict[name].keys():
-        #         qmaxs.append(data_dict[name]['qmax'])
-        # states = np.concatenate(states)
-        # actions = np.concatenate(actions)
-        # rewards = np.concatenate(rewards)
-        # next_states = np.concatenate(next_states)
-        # terminations = np.concatenate(terminations)
-        # next_actions = np.concatenate(next_actions)
-        # if len(qmaxs) > 0:
-        #     qmaxs = np.concatenate(qmaxs)
+       
         assert len(list(data_dict.keys())) == 1
         data_dict = data_dict[list(data_dict.keys())[0]]
         states = data_dict['states']
@@ -488,24 +460,6 @@ class Agent:
             timeout = data_dict['timeouts']
         else:
             timeout = np.zeros(len(states))
-    
-        # for i in range(len(states)):
-        #     states[i] = self.cfg.state_normalizer(states[i])
-        #     next_states[i] = self.cfg.state_normalizer(next_states[i])
-        #     # print(next_states[i])
-        
-        # # pred_returns = np.zeros(len(states))
-        # true_returns = np.zeros(len(states))
-        # for i in range(len(states) - 1, -1, -1):
-        #     if i == len(states) - 1 or (not np.array_equal(next_states[i], states[i + 1])):
-        #         # pred_returns[i] = value_predictor(self.cfg.state_normalizer(states[i]))[actions[i]]
-        #         true_pred = self.true_q_predictor(self.cfg.state_normalizer(states[i]))
-        #         true_returns[i] = 0 if true_pred is None else true_pred[actions[i]]
-        #     else:
-        #         end = 1.0 if terminations[i] else 0.0
-        #         # pred_returns[i] = rewards[i] + (1 - end) * self.cfg.discount * pred_returns[i + 1]
-        #         true_returns[i] = rewards[i] + (1 - end) * self.cfg.discount * true_returns[i + 1]
-
         # thrshd = int(len(states) * 0.8)
         thrshd = int(len(states))
         training_s = states[: thrshd]
@@ -515,9 +469,6 @@ class Agent:
         training_t = terminations[: thrshd]
         training_na = next_actions[: thrshd]
         training_timeout = timeout[: thrshd]
-        # training_pred_ret = pred_returns[: thrshd]
-        # training_true_ret = true_returns[: thrshd]
-        # training_qmax = qmaxs[: thrshd]
 
         testing_s = states[thrshd:]
         testing_a = actions[thrshd:]
@@ -526,14 +477,8 @@ class Agent:
         testing_t = terminations[thrshd:]
         testing_na = next_actions[thrshd:]
         testing_timeout = timeout[thrshd:]
-        # testing_pred_ret = pred_returns[thrshd:]
-        # testing_true_ret = true_returns[thrshd:]
-        # testing_qmax = qmaxs[thrshd:]
-
         return [training_s, training_a, training_r, training_ns, training_t, training_na, None, training_timeout, None], \
                [testing_s, testing_a, testing_r, testing_ns, testing_t, testing_na, None, testing_timeout, None]
-        # return [np.array(training_s), training_a, np.array(training_r), np.array(training_ns), np.array(training_t), training_na, None, training_true_ret, training_qmax], \
-        #        [np.array(testing_s), testing_a, np.array(testing_r), np.array(testing_ns), np.array(testing_t), testing_na, None, testing_true_ret, testing_qmax]
 
     def property_evaluation_dataset(self, data_dict, qmax_table):
         if data_dict is None:
@@ -674,105 +619,6 @@ class Agent:
         plt.close()
         plt.clf()
 
-class ValueBased(Agent):
-    def __init__(self, cfg):
-        super(ValueBased, self).__init__(cfg)
-        self.polyak = cfg.polyak
-        self.rep_net = cfg.rep_fn()
-        self.val_net = cfg.val_fn()
-
-        # Creating Target Networks
-        rep_net_target = cfg.rep_fn()
-        rep_net_target.load_state_dict(self.rep_net.state_dict())
-        val_net_target = cfg.val_fn()
-        val_net_target.load_state_dict(self.val_net.state_dict())
-        TargetNets = namedtuple('TargetNets', ['rep_net', 'val_net'])
-        self.targets = TargetNets(rep_net=rep_net_target, val_net=val_net_target)
-        if 'load_params' in self.cfg.rep_fn_config and self.cfg.rep_fn_config['load_params']:
-            self.load_rep_fn(cfg.rep_fn_config['path'])
-        if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
-            self.load_val_fn(cfg.val_fn_config['path'])
-
-        params = list(self.rep_net.parameters()) + list(self.val_net.parameters())
-        self.optimizer = cfg.optimizer_fn(params)
-
-        self.vf_loss = cfg.vf_loss_fn()
-        self.constr_fn = cfg.constr_fn()
-
-    def default_value_predictor(self):
-        def vp(x):
-            with torch.no_grad():
-                q = self.val_net(self.rep_net(x))
-            return q
-        return vp
-
-    def default_rep_predictor(self):
-        return lambda x: self.rep_net(x)
-
-    def no_grad_value(self, state):
-        with torch.no_grad():
-            phi = self.rep_net(torch_utils.tensor(self.cfg.state_normalizer(state), self.cfg.device))
-            # phi = self.rep_net(self.cfg.state_normalizer(state))
-            q_values = self.val_net(phi)
-        q_values = torch_utils.to_np(q_values).flatten()
-        return q_values
-
-    def policy(self, state, eps):
-        if self.agent_rng.rand() < eps:
-            action = self.agent_rng.randint(0, self.cfg.action_dim)
-        else:
-            q_values = self.no_grad_value(state)
-            action = self.agent_rng.choice(np.flatnonzero(q_values == q_values.max()))
-        return action
-
-    def load_rep_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.rep_net.load_state_dict(torch.load(path, map_location=self.cfg.device))
-        self.targets.rep_net.load_state_dict(self.rep_net.state_dict())
-        self.cfg.logger.info("Load rep function from {}".format(path))
-
-    def load_val_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.val_net.load_state_dict(torch.load(path, map_location=self.cfg.device))
-        self.targets.val_net.load_state_dict(self.val_net.state_dict())
-        self.cfg.logger.info("Load value function from {}".format(path))
-
-    def save(self, early=False):
-        parameters_dir = self.cfg.get_parameters_dir()
-        if early:
-            path = os.path.join(parameters_dir, "rep_net_earlystop")
-        elif self.cfg.checkpoints:
-            path = os.path.join(parameters_dir, "rep_net_{}".format(self.total_steps))
-        else:
-            path = os.path.join(parameters_dir, "rep_net")
-        torch.save(self.rep_net.state_dict(), path)
-
-        if early:
-            path = os.path.join(parameters_dir, "val_net_earlystop")
-        else:
-            path = os.path.join(parameters_dir, "val_net")
-        torch.save(self.val_net.state_dict(), path)
-
-    def eval_step(self, state):
-        # with torch.no_grad():
-        #     q_values = self.val_net(self.rep_net(torch_utils.tensor(self.cfg.state_normalizer(state), self.cfg.device)))
-        #     q_values = torch_utils.to_np(q_values).flatten()
-        # return self.agent_rng.choice(np.flatnonzero(q_values == q_values.max()))
-        return self.policy(state, 0)
-
-    def check_update(self):
-        return self.cfg.rep_fn_config['train_params'] or self.cfg.val_fn_config['train_params']
-
-    def sync_target(self):
-        # self.targets.rep_net.load_state_dict(self.rep_net.state_dict())
-        # self.targets.val_net.load_state_dict(self.val_net.state_dict())
-        with torch.no_grad():
-            for p, p_targ in zip(self.rep_net.parameters(), self.targets.rep_net.parameters()):
-                p_targ.data.mul_(self.polyak)
-                p_targ.data.add_((1 - self.polyak) * p.data)
-            for p, p_targ in zip(self.val_net.parameters(), self.targets.val_net.parameters()):
-                p_targ.data.mul_(self.polyak)
-                p_targ.data.add_((1 - self.polyak) * p.data)
 
 class ActorCritic(Agent):
     def __init__(self, cfg):
