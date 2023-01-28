@@ -112,7 +112,7 @@ class Agent:
         self.temp = 0
 
     def offline_param_init(self):
-        self.trainset, self.testset = self.training_set_construction(self.offline_data)
+        self.trainset = self.training_set_construction(self.offline_data)
         self.training_size = len(self.trainset[0])
         self.training_indexs = np.arange(self.training_size)
 
@@ -149,7 +149,7 @@ class Agent:
         return data
 
     def get_offline_data(self):
-        train_s, train_a, train_r, train_ns, train_t, train_na, _, timeouts, _ = self.trainset
+        train_s, train_a, train_r, train_ns, train_t = self.trainset
         idxs = self.agent_rng.randint(0, len(train_s), size=self.batch_size) \
             if self.batch_size < len(train_s) else np.arange(len(train_s))
 
@@ -158,55 +158,51 @@ class Agent:
         r = torch_utils.tensor(train_r[idxs], self.device)
         ns = torch_utils.tensor(self.state_normalizer(train_ns[idxs]), self.device)
         t = torch_utils.tensor(train_t[idxs], self.device)
-        na = train_na[idxs]
-        to = timeouts[idxs]
 
         data = {
             'obs': in_,
             'act': act,
             'reward': r,
             'obs2': ns,
-            'done': t,
-            'act2': na,
-            'timeout': to
+            'done': t
         }
         return data
 
-    def get_offline_traj(self, traj_len=3):
-        train_s, train_a, train_r, train_ns, train_t, train_na, _, timeouts, _ = self.trainset
-        idxs = self.agent_rng.randint(0, len(train_s), size=self.batch_size) \
-            if self.batch_size < len(train_s) else np.arange(len(train_s))
-
-        in_ = []
-        act = []
-        r = []
-        ns = []
-        t = []
-        na = []
-        to = []
-        for k in range(traj_len):
-            in_.append(torch_utils.tensor(self.state_normalizer(train_s[idxs-k]), self.device))
-            act.append(train_a[idxs-k])
-            r.append(torch_utils.tensor(train_r[idxs-k], self.device))
-            ns.append(torch_utils.tensor(self.state_normalizer(train_ns[idxs-k]), self.device))
-            t.append(torch_utils.tensor(train_t[idxs-k], self.device))
-            na.append(train_na[idxs-k])
-            to.append(timeouts[idxs-k])
-        
-        starts = np.where(idxs < traj_len)[0]
-        for st in starts:
-            t[idxs[st]][st] = 1
-        
-        data = {
-            'obs': in_,
-            'act': act,
-            'reward': r,
-            'obs2': ns,
-            'done': t,
-            'act2': na,
-            'timeout': to
-        }
-        return data
+    # def get_offline_traj(self, traj_len=3):
+    #     train_s, train_a, train_r, train_ns, train_t, train_na, _, timeouts, _ = self.trainset
+    #     idxs = self.agent_rng.randint(0, len(train_s), size=self.batch_size) \
+    #         if self.batch_size < len(train_s) else np.arange(len(train_s))
+    #
+    #     in_ = []
+    #     act = []
+    #     r = []
+    #     ns = []
+    #     t = []
+    #     na = []
+    #     to = []
+    #     for k in range(traj_len):
+    #         in_.append(torch_utils.tensor(self.state_normalizer(train_s[idxs-k]), self.device))
+    #         act.append(train_a[idxs-k])
+    #         r.append(torch_utils.tensor(train_r[idxs-k], self.device))
+    #         ns.append(torch_utils.tensor(self.state_normalizer(train_ns[idxs-k]), self.device))
+    #         t.append(torch_utils.tensor(train_t[idxs-k], self.device))
+    #         na.append(train_na[idxs-k])
+    #         to.append(timeouts[idxs-k])
+    #
+    #     starts = np.where(idxs < traj_len)[0]
+    #     for st in starts:
+    #         t[idxs[st]][st] = 1
+    #
+    #     data = {
+    #         'obs': in_,
+    #         'act': act,
+    #         'reward': r,
+    #         'obs2': ns,
+    #         'done': t,
+    #         'act2': na,
+    #         'timeout': to
+    #     }
+    #     return data
 
     # def get_weighted_offline_data(self, higher_priority_index, higher_priority_prob):
     #     train_s, train_a, train_r, train_ns, train_t, train_na, _, timeouts, _ = self.trainset
@@ -261,7 +257,7 @@ class Agent:
     #     return data
 
     def fill_offline_data_to_buffer(self):
-        self.trainset, self.testset = self.training_set_construction(self.offline_data)
+        self.trainset = self.training_set_construction(self.offline_data)
         train_s, train_a, train_r, train_ns, train_t, _, _, _, _ = self.trainset
         for idx in range(len(train_s)):
             self.replay.feed([train_s[idx], train_a[idx], train_r[idx], train_ns[idx], train_t[idx]])
@@ -423,23 +419,23 @@ class Agent:
         np.put_along_axis(one_hot, actions.reshape((-1, 1)), 1, axis=1)
         return one_hot
     
-    def default_value_predictor(self):
-        def vp(x):
-            with torch.no_grad():
-                q1, q2 = self.ac.q1q2(x)
-            return torch.minimum(q1, q2)
-        return vp
-
-    def default_rep_predictor(self):
-        def rp(x):
-            with torch.no_grad():
-                rep = self.ac.pi.body(self.ac.pi.rep(x))
-            return rep
-        return rp
+    # def default_value_predictor(self):
+    #     def vp(x):
+    #         with torch.no_grad():
+    #             q1, q2 = self.ac.q1q2(x)
+    #         return torch.minimum(q1, q2)
+    #     return vp
+    #
+    # def default_rep_predictor(self):
+    #     def rp(x):
+    #         with torch.no_grad():
+    #             rep = self.ac.pi.body(self.ac.pi.rep(x))
+    #         return rep
+    #     return rp
     
-    def training_set_construction(self, data_dict, value_predictor=None):
-        if value_predictor is None:
-            value_predictor = self.default_value_predictor()
+    def training_set_construction(self, data_dict):
+        # if value_predictor is None:
+        #     value_predictor = self.default_value_predictor()
        
         assert len(list(data_dict.keys())) == 1
         data_dict = data_dict[list(data_dict.keys())[0]]
@@ -448,27 +444,28 @@ class Agent:
         rewards = data_dict['rewards']
         next_states = data_dict['next_states']
         terminations = data_dict['terminations']
-        next_actions = np.concatenate([data_dict['actions'][1:], data_dict['actions'][-1:]])  # Should not be used when using the current estimation in target construction
-        if 'timeouts' in data_dict:
-            timeout = data_dict['timeouts']
-        else:
-            timeout = np.zeros(len(states))
+        # next_actions = np.concatenate([data_dict['actions'][1:], data_dict['actions'][-1:]])  # Should not be used when using the current estimation in target construction
+        # if 'timeouts' in data_dict:
+        #     timeout = data_dict['timeouts']
+        # else:
+        #     timeout = np.zeros(len(states))
         # thrshd = int(len(states) * 0.8)
-        thrshd = int(len(states))
-        training_s = states[: thrshd]
-        training_a = actions[: thrshd]
-        training_r = rewards[: thrshd]
-        training_ns = next_states[: thrshd]
-        training_t = terminations[: thrshd]
-        training_na = next_actions[: thrshd]
-        training_timeout = timeout[: thrshd]
-
-        testing_s = states[thrshd:]
-        testing_a = actions[thrshd:]
-        testing_r = rewards[thrshd:]
-        testing_ns = next_states[thrshd:]
-        testing_t = terminations[thrshd:]
-        testing_na = next_actions[thrshd:]
-        testing_timeout = timeout[thrshd:]
-        return [training_s, training_a, training_r, training_ns, training_t, training_na, None, training_timeout, None], \
-               [testing_s, testing_a, testing_r, testing_ns, testing_t, testing_na, None, testing_timeout, None]
+        # thrshd = int(len(states))
+        # training_s = states[: thrshd]
+        # training_a = actions[: thrshd]
+        # training_r = rewards[: thrshd]
+        # training_ns = next_states[: thrshd]
+        # training_t = terminations[: thrshd]
+        # # training_na = next_actions[: thrshd]
+        # # training_timeout = timeout[: thrshd]
+        #
+        # testing_s = states[thrshd:]
+        # testing_a = actions[thrshd:]
+        # testing_r = rewards[thrshd:]
+        # testing_ns = next_states[thrshd:]
+        # testing_t = terminations[thrshd:]
+        # # testing_na = next_actions[thrshd:]
+        # # testing_timeout = timeout[thrshd:]
+        return [states, actions, rewards, next_states, terminations]
+        # return [training_s, training_a, training_r, training_ns, training_t, training_na, None, training_timeout, None], \
+        #        [testing_s, testing_a, testing_r, testing_ns, testing_t, testing_na, None, testing_timeout, None]
