@@ -95,7 +95,7 @@ class InSampleACOnline(base.Agent):
         self.beh_pi = get_policy_func()
         self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
 
-        self.clip_grad_param = cfg.clip_grad_param
+        # self.clip_grad_param = cfg.clip_grad_param
         self.exp_threshold = cfg.exp_threshold
         # self.beta_threshold = 1e-3
 

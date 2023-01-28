@@ -46,12 +46,12 @@ if __name__ == '__main__':
     #     cfg.alpha_optimizer_fn = optimizer.OptFactory.get_optimizer_fn(cfg.learning_rate, cfg.optimizer_type)
     #     cfg.vs_optimizer_fn = optimizer.OptFactory.get_optimizer_fn(cfg.learning_rate, cfg.optimizer_type)
 
-    cfg.replay_fn = replay.ReplayFactory.get_replay_fn(cfg)
+    # cfg.replay_fn = replay.ReplayFactory.get_replay_fn(cfg)
     # cfg.eps_schedule = schedule.ScheduleFactory.get_eps_schedule(cfg)
-    cfg.state_normalizer, cfg.reward_normalizer = normalizer.NormalizerFactory.get_normalizer(cfg)
+    # cfg.state_normalizer, cfg.reward_normalizer = normalizer.NormalizerFactory.get_normalizer(cfg)
     cfg.offline_data = run_funcs.load_testset(cfg.offline_data_path, cfg.run, cfg.env_name)
-    cfg.eval_data = run_funcs.load_testset(cfg.evalset_path, cfg.run, cfg.env_name)
-    cfg.tester_fn = tester.TesterFactory.get_tester_fn(cfg)
+    # cfg.eval_data = run_funcs.load_testset(cfg.evalset_path, cfg.run, cfg.env_name)
+    # cfg.tester_fn = tester.TesterFactory.get_tester_fn(cfg)
 
     # Setting up the logger
     cfg.logger = logger.Logger(cfg)

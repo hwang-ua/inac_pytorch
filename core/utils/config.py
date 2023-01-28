@@ -593,10 +593,9 @@ class InSampleConfig(AWACOfflineConfig):
 
     def get_print_attrs(self):
         attrs = dict(self.__dict__)
-        for k in ['logger', 'replay_fn',
-                  '_Config__env_fn', 'state_normalizer',
-                  'reward_normalizer',
-                  'offline_data', 'eval_data']:
+        for k in ['logger',
+                  '_Config__env_fn',
+                  'offline_data']:
             del attrs[k]
         return attrs
 
