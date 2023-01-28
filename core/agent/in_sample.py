@@ -27,8 +27,8 @@ class InSampleACOnline(base.Agent):
         self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
         self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
         self.value_net = None
-        self.pi_optimizer = cfg.policy_optimizer_fn(list(self.ac.pi.parameters()))
-        self.q_optimizer = cfg.critic_optimizer_fn(list(self.ac.q1q2.parameters()))
+        self.pi_optimizer = torch.optim.Adam(list(self.ac.pi.parameters()), cfg.learning_rate)
+        self.q_optimizer = torch.optim.Adam(list(self.ac.q1q2.parameters()), cfg.learning_rate)
         self.polyak = cfg.polyak #0 is hard sync
 
         if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
@@ -51,9 +51,9 @@ class InSampleACOnline(base.Agent):
         if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
             self.load_state_value_fn(cfg.val_fn_config['path'])
 
-        self.value_optimizer = cfg.vs_optimizer_fn(list(self.value_net.parameters()))
+        self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), cfg.learning_rate)
         self.beh_pi = cfg.policy_fn()
-        self.beh_pi_optimizer = cfg.policy_optimizer_fn(list(self.beh_pi.parameters()))
+        self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
 
         self.clip_grad_param = cfg.clip_grad_param
         self.exp_threshold = cfg.exp_threshold
@@ -102,28 +102,6 @@ class InSampleACOnline(base.Agent):
             for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
-
-    def compute_loss_pi(self, data):
-        states, actions = data['obs'], data['act']
-        log_probs = self.ac.pi.get_logprob(states, actions)
-        actor_loss = -log_probs.mean()
-        return actor_loss, log_probs
-
-    def save(self, early=False):
-        parameters_dir = self.cfg.get_parameters_dir()
-        if early:
-            path = os.path.join(parameters_dir, "actor_net_earlystop")
-        elif self.cfg.checkpoints:
-            path = os.path.join(parameters_dir, "actor_net_{}".format(self.total_steps))
-        else:
-            path = os.path.join(parameters_dir, "actor_net")
-        torch.save(self.ac.pi.state_dict(), path)
-    
-        if early:
-            path = os.path.join(parameters_dir, "critic_net_earlystop")
-        else:
-            path = os.path.join(parameters_dir, "critic_net")
-        torch.save(self.ac.q1q2.state_dict(), path)
 
     def load_actor_fn(self, parameters_dir):
         path = os.path.join(self.cfg.data_root, parameters_dir)
@@ -209,10 +187,7 @@ class InSampleACOnline(base.Agent):
         return loss_beh_pi
 
     def update(self, data):
-        if not self.cfg.pretrain_beta:
-            loss_beta = self.update_beta(data).item()
-        else:
-            loss_beta = None
+        loss_beta = self.update_beta(data).item()
         
         self.value_optimizer.zero_grad()
         loss_vs, v_info, logp_info = self.compute_loss_value(data)
@@ -241,27 +216,15 @@ class InSampleACOnline(base.Agent):
                 "logp_info": logp_info.mean(),
                 }
 
-
-    def save(self, early=False):
+    def save(self):
         parameters_dir = self.cfg.get_parameters_dir()
-        if early:
-            path = os.path.join(parameters_dir, "actor_net_earlystop")
-        elif self.cfg.checkpoints:
-            path = os.path.join(parameters_dir, "actor_net_{}".format(self.total_steps))
-        else:
-            path = os.path.join(parameters_dir, "actor_net")
+        path = os.path.join(parameters_dir, "actor_net")
         torch.save(self.ac.pi.state_dict(), path)
-
-        if early:
-            path = os.path.join(parameters_dir, "critic_net_earlystop")
-        else:
-            path = os.path.join(parameters_dir, "critic_net")
+    
+        path = os.path.join(parameters_dir, "critic_net")
         torch.save(self.ac.q1q2.state_dict(), path)
-
-        if early:
-            path = os.path.join(parameters_dir, "vs_net_earlystop")
-        else:
-            path = os.path.join(parameters_dir, "vs_net")
+    
+        path = os.path.join(parameters_dir, "vs_net")
         torch.save(self.value_net.state_dict(), path)
 
 
@@ -269,12 +232,6 @@ class InSampleAC(InSampleACOnline):
     def __init__(self, cfg):
         super(InSampleAC, self).__init__(cfg)
         self.offline_param_init()
-        if self.cfg.pretrain_beta:
-            for i in range(20000):
-                # if i % 10000 == 0:
-                #     print(i)
-                data = self.get_offline_data()
-                self.update_beta(data)
 
     def get_data(self):
         return self.get_offline_data()
