@@ -19,38 +19,18 @@ class InSampleACOnline(base.Agent):
         
         def get_policy_func():
             if cfg.policy_fn_config['policy_type'] == "policy-cont":
-                pi = MLPCont(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
-                                           cfg.action_dim, cfg.policy_fn_config['hidden_units'],
-                                           action_range=cfg.action_range,
-                                           rep=None,
-                                           init_type='xavier',
-                                           info=cfg.policy_fn_config.get('info', None),
-                                           )
+                pi = MLPCont(cfg.device, np.prod(cfg.policy_fn_config['in_dim']), cfg.action_dim, cfg.policy_fn_config['hidden_units'])
             elif cfg.policy_fn_config['policy_type'] == 'policy-discrete':
-                pi = MLPDiscrete(cfg.device, np.prod(cfg.policy_fn_config['in_dim']),
-                                               cfg.action_dim, cfg.policy_fn_config['hidden_units'],
-                                               rep=None,
-                                               init_type='xavier',
-                                               info=cfg.policy_fn_config.get('info', None),
-                                               )
+                pi = MLPDiscrete(cfg.device, np.prod(cfg.policy_fn_config['in_dim']), cfg.action_dim, cfg.policy_fn_config['hidden_units'])
             return pi
 
         def get_critic_func():
             if cfg.critic_fn_config['network_type'] == 'fc':
-                q1q2 = DoubleCriticDiscrete(cfg.device, np.prod(cfg.critic_fn_config['in_dim']),
-                                                                          cfg.critic_fn_config['hidden_units'],
-                                                                          cfg.critic_fn_config.get('out_dim', cfg.action_dim),
-                                                                          rep=None,
-                                                                          init_type=cfg.critic_fn_config.get('init_type', 'xavier'),
-                                                                          info=cfg.critic_fn_config.get('info', None),
-                                                                          )
+                q1q2 = DoubleCriticDiscrete(cfg.device, np.prod(cfg.critic_fn_config['in_dim']), cfg.critic_fn_config['hidden_units'], cfg.critic_fn_config.get('out_dim', cfg.action_dim))
             elif cfg.critic_fn_config['network_type'] == 'fc-insert-input':
-                q1q2 = DoubleCriticNetwork(cfg.device, np.prod(cfg.critic_fn_config['in_dim']), cfg.action_dim,
-                                                                         cfg.critic_fn_config['hidden_units'],
-                                                                         rep=None)
+                q1q2 = DoubleCriticNetwork(cfg.device, np.prod(cfg.critic_fn_config['in_dim']), cfg.action_dim, cfg.critic_fn_config['hidden_units'])
             return q1q2
-        
-        
+            
         pi = get_policy_func()
         q1q2 = get_critic_func()
         AC = namedtuple('AC', ['q1q2', 'pi'])
@@ -82,12 +62,7 @@ class InSampleACOnline(base.Agent):
             self.get_q_value_target = self.get_q_value_target_cont
         
         self.tau = cfg.tau
-        self.value_net = FCNetwork(cfg.device, np.prod(cfg.val_fn_config['in_dim']),
-                                        cfg.val_fn_config['hidden_units'], 1,
-                                        rep=None,
-                                        init_type='xavier',
-                                        info=cfg.val_fn_config.get('info', None)
-                                        )
+        self.value_net = FCNetwork(cfg.device, np.prod(cfg.val_fn_config['in_dim']), cfg.val_fn_config['hidden_units'], 1)
         if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
             self.load_state_value_fn(cfg.val_fn_config['path'])
 
