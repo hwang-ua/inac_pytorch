@@ -12,9 +12,9 @@ import torch
 from core.network.policy_factory import MLPCont, MLPDiscrete
 from core.network.network_architectures import DoubleCriticNetwork, DoubleCriticDiscrete, FCNetwork
 
-class InSampleACOnline(base.Agent):
+class InSampleAC(base.Agent):
     def __init__(self, cfg):
-        super(InSampleACOnline, self).__init__(cfg)
+        super(InSampleAC, self).__init__(cfg)
         self.cfg = cfg
         
         def get_policy_func():
@@ -35,7 +35,6 @@ class InSampleACOnline(base.Agent):
         q1q2 = get_critic_func()
         AC = namedtuple('AC', ['q1q2', 'pi'])
         self.ac = AC(q1q2=q1q2, pi=pi)
-
         pi_target = get_policy_func()
         q1q2_target = get_critic_func()
         q1q2_target.load_state_dict(q1q2.state_dict())
@@ -44,101 +43,39 @@ class InSampleACOnline(base.Agent):
         self.ac_targ = ACTarg(q1q2=q1q2_target, pi=pi_target)
         self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
         self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
-        self.value_net = None
+        self.beh_pi = get_policy_func()
+        self.value_net = FCNetwork(cfg.device, np.prod(cfg.val_fn_config['in_dim']), cfg.val_fn_config['hidden_units'], 1)
+
+        # if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
+        #     self.load_actor_fn(cfg.policy_fn_config['path'])
+        # if 'load_params' in self.cfg.critic_fn_config and self.cfg.critic_fn_config['load_params']:
+        #     self.load_critic_fn(cfg.critic_fn_config['path'])
+        # if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
+        #     self.load_state_value_fn(cfg.val_fn_config['path'])
+
         self.pi_optimizer = torch.optim.Adam(list(self.ac.pi.parameters()), cfg.learning_rate)
         self.q_optimizer = torch.optim.Adam(list(self.ac.q1q2.parameters()), cfg.learning_rate)
-        self.polyak = cfg.polyak #0 is hard sync
-
-        if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
-            self.load_actor_fn(cfg.policy_fn_config['path'])
-        if 'load_params' in self.cfg.critic_fn_config and self.cfg.critic_fn_config['load_params']:
-            self.load_critic_fn(cfg.critic_fn_config['path'])
-
+        self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), cfg.learning_rate)
+        self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
+        self.exp_threshold = cfg.exp_threshold
         if self.cfg.discrete_control:
             self.get_q_value = self.get_q_value_discrete
             self.get_q_value_target = self.get_q_value_target_discrete
         else:
             self.get_q_value = self.get_q_value_cont
             self.get_q_value_target = self.get_q_value_target_cont
-        
+
         self.tau = cfg.tau
-        self.value_net = FCNetwork(cfg.device, np.prod(cfg.val_fn_config['in_dim']), cfg.val_fn_config['hidden_units'], 1)
-        if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
-            self.load_state_value_fn(cfg.val_fn_config['path'])
+        self.polyak = cfg.polyak #0 is hard sync
+        self.offline_learning = True
+        self.fill_offline_data_to_buffer()
+        if self.offline_learning:
+            self.offline_param_init()
+            self.get_data = self.get_offline_data
+            self.feed_data = self.feed_data_offline
+        return
 
-        self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), cfg.learning_rate)
-        self.beh_pi = get_policy_func()
-        self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
 
-        # self.clip_grad_param = cfg.clip_grad_param
-        self.exp_threshold = cfg.exp_threshold
-        # self.beta_threshold = 1e-3
-
-        if cfg.agent_name == 'InSampleACOnline' and cfg.load_offline_data:
-            self.fill_offline_data_to_buffer()
-
-    def get_q_value_discrete(self, o, a, with_grad=False):
-        if with_grad:
-            q1_pi, q2_pi = self.ac.q1q2(o)
-            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
-            q_pi = torch.min(q1_pi, q2_pi)
-        else:
-            with torch.no_grad():
-                q1_pi, q2_pi = self.ac.q1q2(o)
-                q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
-                q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def get_q_value_target_discrete(self, o, a):
-        with torch.no_grad():
-            q1_pi, q2_pi = self.ac_targ.q1q2(o)
-            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
-            q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def get_q_value_cont(self, o, a, with_grad=False):
-        if with_grad:
-            q1_pi, q2_pi = self.ac.q1q2(o, a)
-            q_pi = torch.min(q1_pi, q2_pi)
-        else:
-            with torch.no_grad():
-                q1_pi, q2_pi = self.ac.q1q2(o, a)
-                q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def get_q_value_target_cont(self, o, a):
-        with torch.no_grad():
-            q1_pi, q2_pi = self.ac_targ.q1q2(o, a)
-            q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def sync_target(self):
-        with torch.no_grad():
-            for p, p_targ in zip(self.ac.q1q2.parameters(), self.ac_targ.q1q2.parameters()):
-                p_targ.data.mul_(self.polyak)
-                p_targ.data.add_((1 - self.polyak) * p.data)
-            for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
-                p_targ.data.mul_(self.polyak)
-                p_targ.data.add_((1 - self.polyak) * p.data)
-
-    def load_actor_fn(self, parameters_dir):
-        path = os.path.join(self.data_root, parameters_dir)
-        self.ac.pi.load_state_dict(torch.load(path, map_location=self.device))
-        self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
-        self.logger.info("Load actor function from {}".format(path))
-
-    def load_critic_fn(self, parameters_dir):
-        path = os.path.join(self.data_root, parameters_dir)
-        self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.device))
-        self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
-        self.logger.info("Load critic function from {}".format(path))
-
-    def load_state_value_fn(self, parameters_dir):
-        path = os.path.join(self.data_root, parameters_dir)
-        self.value_net.load_state_dict(torch.load(path, map_location=self.device))
-        self.logger.info("Load state value function from {}".format(path))
-
-    #-----------------------------------------------------------------------------------------------
     def compute_loss_beh_pi(self, data):
         """L_{\omega}, learn behavior policy"""
         states, actions = data['obs'], data['act']
@@ -234,6 +171,72 @@ class InSampleACOnline(base.Agent):
                 "logp_info": logp_info.mean(),
                 }
 
+
+    def feed_data_offline(self):
+        self.update_stats(0, None)
+        return
+
+    def get_q_value_discrete(self, o, a, with_grad=False):
+        if with_grad:
+            q1_pi, q2_pi = self.ac.q1q2(o)
+            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
+            q_pi = torch.min(q1_pi, q2_pi)
+        else:
+            with torch.no_grad():
+                q1_pi, q2_pi = self.ac.q1q2(o)
+                q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
+                q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def get_q_value_target_discrete(self, o, a):
+        with torch.no_grad():
+            q1_pi, q2_pi = self.ac_targ.q1q2(o)
+            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
+            q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def get_q_value_cont(self, o, a, with_grad=False):
+        if with_grad:
+            q1_pi, q2_pi = self.ac.q1q2(o, a)
+            q_pi = torch.min(q1_pi, q2_pi)
+        else:
+            with torch.no_grad():
+                q1_pi, q2_pi = self.ac.q1q2(o, a)
+                q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def get_q_value_target_cont(self, o, a):
+        with torch.no_grad():
+            q1_pi, q2_pi = self.ac_targ.q1q2(o, a)
+            q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def sync_target(self):
+        with torch.no_grad():
+            for p, p_targ in zip(self.ac.q1q2.parameters(), self.ac_targ.q1q2.parameters()):
+                p_targ.data.mul_(self.polyak)
+                p_targ.data.add_((1 - self.polyak) * p.data)
+            for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
+                p_targ.data.mul_(self.polyak)
+                p_targ.data.add_((1 - self.polyak) * p.data)
+
+    # def load_actor_fn(self, parameters_dir):
+    #     path = os.path.join(self.data_root, parameters_dir)
+    #     self.ac.pi.load_state_dict(torch.load(path, map_location=self.device))
+    #     self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
+    #     self.logger.info("Load actor function from {}".format(path))
+    #
+    # def load_critic_fn(self, parameters_dir):
+    #     path = os.path.join(self.data_root, parameters_dir)
+    #     self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.device))
+    #     self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
+    #     self.logger.info("Load critic function from {}".format(path))
+    #
+    # def load_state_value_fn(self, parameters_dir):
+    #     path = os.path.join(self.data_root, parameters_dir)
+    #     self.value_net.load_state_dict(torch.load(path, map_location=self.device))
+    #     self.logger.info("Load state value function from {}".format(path))
+
     def save(self):
         parameters_dir = self.parameters_dir
         path = os.path.join(parameters_dir, "actor_net")
@@ -246,15 +249,4 @@ class InSampleACOnline(base.Agent):
         torch.save(self.value_net.state_dict(), path)
 
 
-class InSampleAC(InSampleACOnline):
-    def __init__(self, cfg):
-        super(InSampleAC, self).__init__(cfg)
-        self.offline_param_init()
-
-    def get_data(self):
-        return self.get_offline_data()
-
-    def feed_data(self):
-        self.update_stats(0, None)
-        return
 

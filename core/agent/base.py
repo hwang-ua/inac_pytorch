@@ -258,7 +258,7 @@ class Agent:
 
     def fill_offline_data_to_buffer(self):
         self.trainset = self.training_set_construction(self.offline_data)
-        train_s, train_a, train_r, train_ns, train_t, _, _, _, _ = self.trainset
+        train_s, train_a, train_r, train_ns, train_t = self.trainset
         for idx in range(len(train_s)):
             self.replay.feed([train_s[idx], train_a[idx], train_r[idx], train_ns[idx], train_t[idx]])
 
@@ -278,10 +278,10 @@ class Agent:
     def update(self, data):
         raise NotImplementedError
         
-    def reset_population_flag(self):
-        # Done evaluation, regenerate data at next checkpoint
-        self.populate_latest = False
-        self.populate_states, self.populate_actions, self.populate_true_qs = None, None, None
+    # def reset_population_flag(self):
+    #     # Done evaluation, regenerate data at next checkpoint
+    #     self.populate_latest = False
+    #     self.populate_states, self.populate_actions, self.populate_true_qs = None, None, None
 
     def update_stats(self, reward, done):
         self.episode_reward += reward
@@ -372,9 +372,6 @@ class Agent:
                 states.insert(0, s)
         return total_rewards, ep_steps, [states, actions, rets]
 
-    def eval_episodes(self):
-        return
-
     def log_return(self, log_ary, name, elapsed_time):
         rewards = log_ary
         total_episodes = len(self.episode_rewards)
@@ -406,7 +403,6 @@ class Agent:
         o = torch_utils.tensor(self.state_normalizer(o), self.device)
         with torch.no_grad():
             a, _ = self.ac.pi(o, deterministic=eval)
-            # a, _ = self.ac.pi(o)
         a = torch_utils.to_np(a)
         return a
 
@@ -414,10 +410,10 @@ class Agent:
         a = self.policy(state, eval=True)
         return a
 
-    def one_hot_action(self, actions):
-        one_hot = np.zeros((len(actions), self.action_dim))
-        np.put_along_axis(one_hot, actions.reshape((-1, 1)), 1, axis=1)
-        return one_hot
+    # def one_hot_action(self, actions):
+    #     one_hot = np.zeros((len(actions), self.action_dim))
+    #     np.put_along_axis(one_hot, actions.reshape((-1, 1)), 1, axis=1)
+    #     return one_hot
     
     # def default_value_predictor(self):
     #     def vp(x):
