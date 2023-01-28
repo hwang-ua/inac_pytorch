@@ -2,7 +2,6 @@ import os
 
 import numpy as np
 import torch
-from collections import namedtuple
 import copy
 
 import matplotlib.pyplot as plt
@@ -63,7 +62,7 @@ class Agent:
         if self.reset is True:
             self.state = self.env.reset()
             self.reset = False
-        action = self.policy(self.state, self.cfg.eps_schedule())
+        action = self.policy(self.state, eval=False)
         next_state, reward, done, _ = self.env.step([action])
         self.replay.feed([self.state, action, reward, next_state, int(done)])
         prev_state = self.state
@@ -221,7 +220,7 @@ class Agent:
         return trans, losses
     
     def check_update(self):
-        return NotImplementedError
+        return self.cfg.policy_fn_config["train_params"] or self.cfg.critic_fn_config["train_params"]
     
     def update(self, data):
         raise NotImplementedError
@@ -419,13 +418,17 @@ class Agent:
                 pass
         return mean, median, min_, max_
 
-    def policy(self, state, eps):
-        raise NotImplementedError
+    def policy(self, o, eval=False):
+        o = torch_utils.tensor(self.cfg.state_normalizer(o), self.cfg.device)
+        with torch.no_grad():
+            a, _ = self.ac.pi(o, deterministic=eval)
+            # a, _ = self.ac.pi(o)
+        a = torch_utils.to_np(a)
+        return a
 
     def eval_step(self, state):
-        # action = self.policy(state, 0)
-        # return action
-        raise NotImplementedError
+        a = self.policy(state, eval=True)
+        return a
 
     def save(self, filename):
         raise NotImplementedError
@@ -439,10 +442,18 @@ class Agent:
         return one_hot
     
     def default_value_predictor(self):
-        raise NotImplementedError
-    
+        def vp(x):
+            with torch.no_grad():
+                q1, q2 = self.ac.q1q2(x)
+            return torch.minimum(q1, q2)
+        return vp
+
     def default_rep_predictor(self):
-        raise NotImplementedError
+        def rp(x):
+            with torch.no_grad():
+                rep = self.ac.pi.body(self.ac.pi.rep(x))
+            return rep
+        return rp
     
     def training_set_construction(self, data_dict, value_predictor=None):
         if value_predictor is None:
@@ -618,229 +629,4 @@ class Agent:
         # plt.savefig("{}/action_values_{}.png".format(pth, self.total_steps), dpi=300, bbox_inches='tight')
         plt.close()
         plt.clf()
-
-
-class ActorCritic(Agent):
-    def __init__(self, cfg):
-        super(ActorCritic, self).__init__(cfg)
-        q1q2 = cfg.critic_fn()
-        pi = cfg.policy_fn()
-        AC = namedtuple('AC', ['q1q2', 'pi'])
-        self.ac = AC(q1q2=q1q2, pi=pi)
-
-        q1q2_target = cfg.critic_fn()
-        pi_target = cfg.policy_fn()
-        q1q2_target.load_state_dict(q1q2.state_dict())
-        pi_target.load_state_dict(pi.state_dict())
-        ACTarg = namedtuple('ACTarg', ['q1q2', 'pi'])
-        self.ac_targ = ACTarg(q1q2=q1q2_target, pi=pi_target)
-        self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
-        self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
-
-        # self.q_params = self.ac.q1q2.parameters()
-        self.value_net = None
-        
-        self.pi_optimizer = cfg.policy_optimizer_fn(list(self.ac.pi.parameters()))
-        self.q_optimizer = cfg.critic_optimizer_fn(list(self.ac.q1q2.parameters()))
-        self.polyak = cfg.polyak #0 is hard sync
-
-        if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
-            self.load_actor_fn(cfg.policy_fn_config['path'])
-        if 'load_params' in self.cfg.critic_fn_config and self.cfg.critic_fn_config['load_params']:
-            self.load_critic_fn(cfg.critic_fn_config['path'])
-        
-        if self.cfg.discrete_control:
-            self.get_q_value = self.get_q_value_discrete
-            self.get_q_value_target = self.get_q_value_target_discrete
-        else:
-            self.get_q_value = self.get_q_value_cont
-            self.get_q_value_target = self.get_q_value_target_cont
-
-
-    def default_value_predictor(self):
-        def vp(x):
-            with torch.no_grad():
-                q1, q2 = self.ac.q1q2(x)
-            return torch.minimum(q1, q2)
-        return vp
-
-    def default_rep_predictor(self):
-        def rp(x):
-            with torch.no_grad():
-                rep = self.ac.pi.body(self.ac.pi.rep(x))
-            return rep
-        return rp
-    
-    def feed_data(self):
-        if self.reset is True:
-            self.state = self.env.reset()
-            self.reset = False
-        action = self.policy(self.state, eval=False)
-        next_state, reward, done, _ = self.env.step([action])
-        self.replay.feed([self.state, action, reward, next_state, int(done)])
-        prev_state = self.state
-        self.state = next_state
-        self.update_stats(reward, done)
-        return prev_state, action, reward, next_state, int(done)
-
-    def save(self, early=False):
-        parameters_dir = self.cfg.get_parameters_dir()
-        if early:
-            path = os.path.join(parameters_dir, "actor_net_earlystop")
-        elif self.cfg.checkpoints:
-            path = os.path.join(parameters_dir, "actor_net_{}".format(self.total_steps))
-        else:
-            path = os.path.join(parameters_dir, "actor_net")
-        torch.save(self.ac.pi.state_dict(), path)
-
-        if early:
-            path = os.path.join(parameters_dir, "critic_net_earlystop")
-        else:
-            path = os.path.join(parameters_dir, "critic_net")
-        torch.save(self.ac.q1q2.state_dict(), path)
-
-    def load_actor_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.ac.pi.load_state_dict(torch.load(path, map_location=self.cfg.device))
-        self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
-        self.cfg.logger.info("Load actor function from {}".format(path))
-
-    def load_critic_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.cfg.device))
-        self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
-        self.cfg.logger.info("Load critic function from {}".format(path))
-
-    def load_state_value_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.value_net.load_state_dict(torch.load(path, map_location=self.cfg.device))
-        self.cfg.logger.info("Load state value function from {}".format(path))
-
-    def policy(self, o, eval=False):
-        o = torch_utils.tensor(self.cfg.state_normalizer(o), self.cfg.device)
-        with torch.no_grad():
-            a, _ = self.ac.pi(o, deterministic=eval)
-            # a, _ = self.ac.pi(o)
-        a = torch_utils.to_np(a)
-        return a
-
-    def eval_step(self, state):
-        a = self.policy(state, eval=True)
-        return a
-
-    def check_update(self):
-        return self.cfg.policy_fn_config["train_params"] or self.cfg.critic_fn_config["train_params"]
-    
-    def compute_loss_q(self, data):
-        o, a, r, op, d = data['obs'], data['act'], data['reward'], data['obs2'], data['done']
-
-        # q1, q2 = self.ac.q1q2(o)
-        # q1, q2 = q1[np.arange(len(a)), a], q2[np.arange(len(a)), a]
-        _, q1, q2 = self.get_q_value(o, a, with_grad=True)
-
-        # Bellman backup for Q functions
-        with torch.no_grad():
-            # Target actions come from *current* policy
-            a2, logp_a2 = self.ac.pi(op)
-
-            # Target Q-values
-            # q1_pi_targ, q2_pi_targ = self.ac_targ.q1q2(op)
-            # q1_pi_targ, q2_pi_targ = q1_pi_targ[np.arange(len(a2)), a2], q2_pi_targ[np.arange(len(a2)), a2]
-            # q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ)
-        q_pi_targ, _, _ = self.get_q_value_target(op, a2)
-        backup = r + self.gamma * (1 - d) * (q_pi_targ)# - self.alpha * logp_a2)
-
-        # MSE loss against Bellman backup
-        loss_q1 = ((q1 - backup) ** 2).mean()
-        loss_q2 = ((q2 - backup) ** 2).mean()
-        loss_q = loss_q1 + loss_q2
-
-        # Useful info for logging
-        q_info = dict(Q1Vals=q1.detach().numpy(),
-                      Q2Vals=q2.detach().numpy())
-
-        return loss_q, q_info
-
-    def update(self, data):
-        # First run one gradient descent step for Q1 and Q2
-        self.q_optimizer.zero_grad()
-        loss_q, q_info = self.compute_loss_q(data)
-        loss_q.backward()
-        self.q_optimizer.step()
-
-        # Record things
-        # self.logger.store(LossQ=loss_q.item(), **q_info)
-        # Freeze Q-networks so you don't waste computational effort
-        # computing gradients for them during the policy learning step.
-        # for p in self.q_params:
-        #     p.requires_grad = False
-
-        # Next run one gradient descent step for pi.
-        self.pi_optimizer.zero_grad()
-        loss_pi, log_prob = self.compute_loss_pi(data)
-        loss_pi.backward()
-        self.pi_optimizer.step()
-
-        # Unfreeze Q-networks so you can optimize it at next step.
-        # for p in self.q_params:
-        #     p.requires_grad = True
-
-        # # Record things
-        # self.logger.store(LossPi=loss_pi.item(), **pi_info)
-
-        # Finally, update target networks by polyak averaging.
-        if self.cfg.use_target_network and self.total_steps % self.cfg.target_network_update_freq == 0:
-            self.sync_target()
-            
-        return loss_q, q_info, loss_pi, log_prob
-            
-    def sync_target(self):
-        with torch.no_grad():
-            for p, p_targ in zip(self.ac.q1q2.parameters(), self.ac_targ.q1q2.parameters()):
-                p_targ.data.mul_(self.polyak)
-                p_targ.data.add_((1 - self.polyak) * p.data)
-            for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
-                p_targ.data.mul_(self.polyak)
-                p_targ.data.add_((1 - self.polyak) * p.data)
-
-    def compute_loss_pi(self, data):
-        states, actions = data['obs'], data['act']
-        log_probs = self.ac.pi.get_logprob(states, actions)
-        actor_loss = -log_probs.mean()
-        return actor_loss, log_probs
-
-    def get_q_value_discrete(self, o, a, with_grad=False):
-        if with_grad:
-            q1_pi, q2_pi = self.ac.q1q2(o)
-            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
-            q_pi = torch.min(q1_pi, q2_pi)
-        else:
-            with torch.no_grad():
-                q1_pi, q2_pi = self.ac.q1q2(o)
-                q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
-                q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def get_q_value_target_discrete(self, o, a):
-        with torch.no_grad():
-            q1_pi, q2_pi = self.ac_targ.q1q2(o)
-            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
-            q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def get_q_value_cont(self, o, a, with_grad=False):
-        if with_grad:
-            q1_pi, q2_pi = self.ac.q1q2(o, a)
-            q_pi = torch.min(q1_pi, q2_pi)
-        else:
-            with torch.no_grad():
-                q1_pi, q2_pi = self.ac.q1q2(o, a)
-                q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
-
-    def get_q_value_target_cont(self, o, a):
-        with torch.no_grad():
-            q1_pi, q2_pi = self.ac_targ.q1q2(o, a)
-            q_pi = torch.min(q1_pi, q2_pi)
-        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
 

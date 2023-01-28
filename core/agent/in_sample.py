@@ -5,13 +5,43 @@ from core.agent import base
 import core.network.net_factory as network
 import core.network.activations as activations
 import core.utils.torch_utils as torch_utils
-
+from collections import namedtuple
 import os
 import torch
 
-class InSampleACOnline(base.ActorCritic):
+class InSampleACOnline(base.Agent):
     def __init__(self, cfg):
         super(InSampleACOnline, self).__init__(cfg)
+        q1q2 = cfg.critic_fn()
+        pi = cfg.policy_fn()
+        AC = namedtuple('AC', ['q1q2', 'pi'])
+        self.ac = AC(q1q2=q1q2, pi=pi)
+
+        q1q2_target = cfg.critic_fn()
+        pi_target = cfg.policy_fn()
+        q1q2_target.load_state_dict(q1q2.state_dict())
+        pi_target.load_state_dict(pi.state_dict())
+        ACTarg = namedtuple('ACTarg', ['q1q2', 'pi'])
+        self.ac_targ = ACTarg(q1q2=q1q2_target, pi=pi_target)
+        self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
+        self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
+        self.value_net = None
+        self.pi_optimizer = cfg.policy_optimizer_fn(list(self.ac.pi.parameters()))
+        self.q_optimizer = cfg.critic_optimizer_fn(list(self.ac.q1q2.parameters()))
+        self.polyak = cfg.polyak #0 is hard sync
+
+        if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
+            self.load_actor_fn(cfg.policy_fn_config['path'])
+        if 'load_params' in self.cfg.critic_fn_config and self.cfg.critic_fn_config['load_params']:
+            self.load_critic_fn(cfg.critic_fn_config['path'])
+
+        if self.cfg.discrete_control:
+            self.get_q_value = self.get_q_value_discrete
+            self.get_q_value_target = self.get_q_value_target_discrete
+        else:
+            self.get_q_value = self.get_q_value_cont
+            self.get_q_value_target = self.get_q_value_target_cont
+
         if cfg.agent_name == 'InSampleACOnline' and cfg.load_offline_data:
             self.fill_offline_data_to_buffer()
         
@@ -28,6 +58,90 @@ class InSampleACOnline(base.ActorCritic):
         self.exp_threshold = cfg.exp_threshold
         # self.beta_threshold = 1e-3
         
+    def get_q_value_discrete(self, o, a, with_grad=False):
+        if with_grad:
+            q1_pi, q2_pi = self.ac.q1q2(o)
+            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
+            q_pi = torch.min(q1_pi, q2_pi)
+        else:
+            with torch.no_grad():
+                q1_pi, q2_pi = self.ac.q1q2(o)
+                q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
+                q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def get_q_value_target_discrete(self, o, a):
+        with torch.no_grad():
+            q1_pi, q2_pi = self.ac_targ.q1q2(o)
+            q1_pi, q2_pi = q1_pi[np.arange(len(a)), a], q2_pi[np.arange(len(a)), a]
+            q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def get_q_value_cont(self, o, a, with_grad=False):
+        if with_grad:
+            q1_pi, q2_pi = self.ac.q1q2(o, a)
+            q_pi = torch.min(q1_pi, q2_pi)
+        else:
+            with torch.no_grad():
+                q1_pi, q2_pi = self.ac.q1q2(o, a)
+                q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def get_q_value_target_cont(self, o, a):
+        with torch.no_grad():
+            q1_pi, q2_pi = self.ac_targ.q1q2(o, a)
+            q_pi = torch.min(q1_pi, q2_pi)
+        return q_pi.squeeze(-1), q1_pi.squeeze(-1), q2_pi.squeeze(-1)
+
+    def sync_target(self):
+        with torch.no_grad():
+            for p, p_targ in zip(self.ac.q1q2.parameters(), self.ac_targ.q1q2.parameters()):
+                p_targ.data.mul_(self.polyak)
+                p_targ.data.add_((1 - self.polyak) * p.data)
+            for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
+                p_targ.data.mul_(self.polyak)
+                p_targ.data.add_((1 - self.polyak) * p.data)
+
+    def compute_loss_pi(self, data):
+        states, actions = data['obs'], data['act']
+        log_probs = self.ac.pi.get_logprob(states, actions)
+        actor_loss = -log_probs.mean()
+        return actor_loss, log_probs
+
+    def save(self, early=False):
+        parameters_dir = self.cfg.get_parameters_dir()
+        if early:
+            path = os.path.join(parameters_dir, "actor_net_earlystop")
+        elif self.cfg.checkpoints:
+            path = os.path.join(parameters_dir, "actor_net_{}".format(self.total_steps))
+        else:
+            path = os.path.join(parameters_dir, "actor_net")
+        torch.save(self.ac.pi.state_dict(), path)
+    
+        if early:
+            path = os.path.join(parameters_dir, "critic_net_earlystop")
+        else:
+            path = os.path.join(parameters_dir, "critic_net")
+        torch.save(self.ac.q1q2.state_dict(), path)
+
+    def load_actor_fn(self, parameters_dir):
+        path = os.path.join(self.cfg.data_root, parameters_dir)
+        self.ac.pi.load_state_dict(torch.load(path, map_location=self.cfg.device))
+        self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
+        self.cfg.logger.info("Load actor function from {}".format(path))
+
+    def load_critic_fn(self, parameters_dir):
+        path = os.path.join(self.cfg.data_root, parameters_dir)
+        self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.cfg.device))
+        self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
+        self.cfg.logger.info("Load critic function from {}".format(path))
+
+    def load_state_value_fn(self, parameters_dir):
+        path = os.path.join(self.cfg.data_root, parameters_dir)
+        self.value_net.load_state_dict(torch.load(path, map_location=self.cfg.device))
+        self.cfg.logger.info("Load state value function from {}".format(path))
+
+    #-----------------------------------------------------------------------------------------------
     def compute_loss_beh_pi(self, data):
         """L_{\omega}, learn behavior policy"""
         states, actions = data['obs'], data['act']
@@ -168,366 +282,3 @@ class InSampleAC(InSampleACOnline):
         self.update_stats(0, None)
         return
 
-
-class InSamplePiW(InSampleAC):
-    """
-    Sample from $\pi_\omega$
-    """
-    def __init__(self, cfg):
-        super(InSamplePiW, self).__init__(cfg)
-
-    def compute_loss_pi(self, data):
-        """L_{\psi}, extract learned policy"""
-        states = data['obs']
-        with torch.no_grad():
-            value = self.get_state_value(states)
-            actions, beh_log_prob = self.beh_pi(states)
-    
-        log_probs = self.ac.pi.get_logprob(states, actions)
-        min_Q, _, _ = self.get_q_value(states, actions, with_grad=False)
-    
-        clipped = torch.clip(torch.exp((min_Q - value) / self.tau - beh_log_prob), self.eps, self.exp_threshold)
-        pi_loss = -(clipped * log_probs).mean()
-        return pi_loss, ""
-
-
-class InSampleBeta(InSampleAC):
-    """
-    Sample from $true behavior policy$
-    """
-    def __init__(self, cfg):
-        super(InSampleBeta, self).__init__(cfg)
-        if type(cfg.true_beh_path) == dict:
-            class TrueBehCfg:
-                def __init__(self, **entries):
-                    self.__dict__.update(entries)
-            true_beh_cfg = TrueBehCfg()
-            true_beh_cfg.device = cfg.device
-            true_beh_cfg.action_dim = cfg.action_dim
-            true_beh_cfg.rep_fn_config = cfg.true_beh_structure["rep_fn_config"]
-            true_beh_cfg.activation_config = cfg.true_beh_structure["activation_config"]
-            true_beh_cfg.val_fn_config = cfg.true_beh_structure["val_fn_config"]
-            true_beh_cfg.rep_activation_fn = activations.ActvFactory.get_activation_fn(true_beh_cfg)
-            true_beh_cfg.rep_fn = network.NetFactory.get_rep_fn(true_beh_cfg)
-            self.true_rep_net = true_beh_cfg.rep_fn()
-            rep_path = os.path.join(self.cfg.data_root, cfg.true_beh_path["rep"])
-            self.true_rep_net.load_state_dict(torch.load(rep_path, map_location=self.cfg.device))
-            true_beh_cfg.val_fn = network.NetFactory.get_val_fn(true_beh_cfg)
-            self.true_val_net = true_beh_cfg.val_fn()
-            val_path = os.path.join(self.cfg.data_root, cfg.true_beh_path["val"])
-            self.true_val_net.load_state_dict(torch.load(val_path, map_location=self.cfg.device))
-            self.true_beh = self.value2policy
-            self.cfg.logger.info("Load true behavior policy from {}".format(val_path))
-        else:
-            path = os.path.join(self.cfg.data_root, cfg.true_beh_path)
-            self.true_beh = cfg.policy_fn()
-            self.true_beh.load_state_dict(torch.load(path, map_location=self.cfg.device))
-            self.cfg.logger.info("Load true behavior policy from {}".format(path))
-
-    def value2policy(self, states):
-        with torch.no_grad():
-            phi = self.true_rep_net(states)
-            val = self.true_val_net(phi)
-            actions = torch.argmax(val, dim=1)
-        log_probs = torch.log(torch.ones(val.size(0)))
-        return actions, log_probs
-    
-    def compute_loss_pi(self, data):
-        """L_{\psi}, extract learned policy"""
-        states = data['obs']
-        with torch.no_grad():
-            value = self.get_state_value(states)
-            actions, beh_log_prob = self.true_beh(states)
-    
-        log_probs = self.ac.pi.get_logprob(states, actions)
-        min_Q, _, _ = self.get_q_value(states, actions, with_grad=False)
-        
-        clipped = torch.clip(torch.exp((min_Q - value) / self.tau - beh_log_prob), self.eps, self.exp_threshold)
-        pi_loss = -(clipped * log_probs).mean()
-        return pi_loss, ""
-    
-
-class InSampleNoV(InSampleAC):
-    """
-    Sample from $\pi_\omega$
-    """
-    def __init__(self, cfg):
-        super(InSampleNoV, self).__init__(cfg)
-        delattr(self, "value_net")
-        delattr(self, "value_optimizer")
-
-    def get_state_value(self, state):
-        with torch.no_grad():
-            action, log_probs = self.ac.pi(state)
-            min_Q, _, _ = self.get_q_value_target(state, action)
-            value = min_Q - self.tau * log_probs
-        return value
-
-    def update(self, data):
-        self.update_beta(data)
-    
-        loss_q, _ = self.compute_loss_q(data)
-        self.q_optimizer.zero_grad()
-        loss_q.backward()
-        self.q_optimizer.step()
-    
-        loss_pi, _ = self.compute_loss_pi(data)
-        self.pi_optimizer.zero_grad()
-        loss_pi.backward()
-        self.pi_optimizer.step()
-    
-        if self.cfg.use_target_network and self.total_steps % self.cfg.target_network_update_freq == 0:
-            self.sync_target()
-    
-        return loss_pi.item(), loss_q.item()
-
-    def save(self, early=False):
-        parameters_dir = self.cfg.get_parameters_dir()
-        if early:
-            path = os.path.join(parameters_dir, "actor_net_earlystop")
-        elif self.cfg.checkpoints:
-            path = os.path.join(parameters_dir, "actor_net_{}".format(self.total_steps))
-        else:
-            path = os.path.join(parameters_dir, "actor_net")
-        torch.save(self.ac.pi.state_dict(), path)
-    
-        if early:
-            path = os.path.join(parameters_dir, "critic_net_earlystop")
-        else:
-            path = os.path.join(parameters_dir, "critic_net")
-        torch.save(self.ac.q1q2.state_dict(), path)
-    
-
-class InSampleEmphatic(InSampleACOnline):
-    def __init__(self, cfg):
-        super(InSampleEmphatic, self).__init__(cfg)
-        self.offline_param_init()
-        if self.cfg.pretrain_beta:
-            for i in range(20000):
-                # if i % 10000 == 0:
-                #     print(i)
-                data = self.get_offline_data()
-                self.update_beta(data)
-        self.eta = 0.1
-        self.i_fn = self.cfg.i_fn
-        self.fhat = copy.deepcopy(self.value_net)
-        self.fhat_optimizer = cfg.vs_optimizer_fn(list(self.fhat.parameters()))
-
-    def get_data(self):
-        return self.get_offline_data()
-
-    def feed_data(self):
-        self.update_stats(0, None)
-        return
-
-    def compute_loss_pi(self, data):
-        states, actions, rewards, next_states, dones = data['obs'], data['act'], data['reward'], data['obs2'], data['done']
-        if self.i_fn==0:
-            i_t = torch.zeros(len(dones))
-            i_tp1 = torch.zeros(len(dones)) + dones
-        elif self.i_fn==1:
-            i_t = torch.ones(len(dones))
-            i_tp1 = torch.ones(len(dones))
-        else:
-            raise NotImplementedError
-        log_probs = self.ac.pi.get_logprob(states, actions)
-        with torch.no_grad():
-            # pi_t, pi_log_probs = self.ac.pi(states)
-            # mu_log_probs = self.beh_pi.get_logprob(states, pi_t)
-            mu_log_probs = self.beh_pi.get_logprob(states, actions)
-            rho_t = torch.clip(torch.exp(log_probs - mu_log_probs), -np.inf, 1)
-            M_t = (1 - self.eta) * i_t + self.eta * self.fhat(states).squeeze(-1)
-
-            # vs_t = self.value_net(states).squeeze(-1)
-            # vs_tp1 = self.value_net(next_states).squeeze(-1)
-            # # v_delta = (rewards - self.tau * pi_log_probs) + self.gamma * (1-dones) * vs_tp1 - vs_t
-            # v_delta = rewards + self.gamma * (1-dones) * vs_tp1 - vs_t
-            f_t = self.fhat(states).squeeze(-1)
-            f_targ = i_tp1 + rho_t * self.gamma * (1-dones) * f_t
-
-        # """L_{\psi}, extract learned policy"""
-        # states, actions = data['obs'], data['act']
-    
-        min_Q, _, _ = self.get_q_value(states, actions, with_grad=False)
-        with torch.no_grad():
-            value = self.get_state_value(states)
-            beh_log_prob = self.beh_pi.get_logprob(states, actions)
-    
-        clipped = torch.clip(torch.exp((min_Q - value) / self.tau - beh_log_prob), self.eps, self.exp_threshold)
-        # pi_loss = -(clipped * log_probs).mean()
-        # pi_loss = -(rho_t * M_t * clipped * log_probs * v_delta).mean()
-        pi_loss = -(rho_t * M_t * clipped * log_probs).mean()
-        
-        f_tp1 = self.fhat(next_states).squeeze(-1)
-        f_loss = (0.5 * (f_tp1 - f_targ) ** 2).mean()
-        self.fhat_optimizer.zero_grad()
-        f_loss.backward()
-        self.fhat_optimizer.step()
-        return pi_loss, ""
-
-
-class InSampleEmphCritic(InSampleACOnline):
-    def __init__(self, cfg):
-        super(InSampleEmphCritic, self).__init__(cfg)
-        self.offline_param_init()
-        if self.cfg.pretrain_beta:
-            for i in range(20000):
-                # if i % 10000 == 0:
-                #     print(i)
-                data = self.get_offline_data()
-                self.update_beta(data)
-
-    def get_data(self):
-        return self.get_offline_data()
-
-    def feed_data(self):
-        self.update_stats(0, None)
-        return
-
-    def compute_loss_q(self, data):
-        states, actions, rewards, next_states, dones = data['obs'], data['act'], data['reward'], data['obs2'], data['done']
-        with torch.no_grad():
-            next_actions, log_probs = self.ac.pi(next_states)
-        min_Q, _, _ = self.get_q_value_target(next_states, next_actions)
-        q_target = rewards + self.gamma * (1 - dones) * (min_Q - self.tau * log_probs)
-        minq, q1, q2 = self.get_q_value(states, actions, with_grad=True)
-        
-        with torch.no_grad():
-            log_pi_phi = self.ac.pi.get_logprob(states, actions)
-            log_pi_w = self.beh_pi.get_logprob(states, actions)
-        ft = 1.0 / (1.0 - self.gamma*(1-dones) * np.clip(np.exp(log_pi_phi-log_pi_w), -np.inf, 1))
-        critic1_loss = (0.5 * (q_target - q1) ** 2 * ft).mean()
-        critic2_loss = (0.5 * (q_target - q2) ** 2 * ft).mean()
-        loss_q = (critic1_loss + critic2_loss) * 0.5
-        q_info = minq.detach().numpy()
-        return loss_q, q_info
-    # def compute_loss_q(self, data):
-    #     states, actions, rewards, next_states, dones = data['obs'], data['act'], data['reward'], data['obs2'], data['done']
-    #     with torch.no_grad():
-    #         next_actions, log_probs = self.ac.pi(next_states)
-    #     min_Q, _, _ = self.get_q_value_target(next_states, next_actions)
-    #     q_target = rewards + self.gamma * (1 - dones) * (min_Q - self.tau * log_probs)
-    #     minq, q1, q2 = self.get_q_value(states, actions, with_grad=True)
-    #
-    #     with torch.no_grad():
-    #         log_pi_phi = self.ac.pi.get_logprob(states, actions)
-    #         log_pi_w = self.beh_pi.get_logprob(states, actions)
-    #     ft = 1.0 / (1.0 - self.gamma*(1-dones) * np.clip(np.exp(log_pi_phi-log_pi_w), -np.inf, 1))
-    #     critic1_loss = (0.5 * (q_target - q1) ** 2 * ft).mean()
-    #     critic2_loss = (0.5 * (q_target - q2) ** 2 * ft).mean()
-    #     loss_q = (critic1_loss + critic2_loss) * 0.5
-    #     q_info = minq.detach().numpy()
-    #     return loss_q, q_info
-
-
-class InSampleWeighted(InSampleACOnline):
-    def __init__(self, cfg):
-        super(InSampleWeighted, self).__init__(cfg)
-        self.higher_priority_index = self.cfg.higher_priority_index
-        self.higher_priority_prob = self.cfg.higher_priority_prob
-        self.offline_param_init()
-        if self.cfg.pretrain_beta:
-            for i in range(20000):
-                data = self.get_offline_data()
-                self.update_beta(data)
-
-    def get_data(self):
-        return self.get_weighted_offline_data(self.higher_priority_index, self.higher_priority_prob)
-
-    def feed_data(self):
-        self.update_stats(0, None)
-        return
-
-
-class InSamplePC(InSampleACOnline):
-    # prior correction
-    def __init__(self, cfg):
-        super(InSamplePC, self).__init__(cfg)
-        self.offline_param_init()
-        assert self.cfg.pretrain_beta == False
-
-    def get_data(self):
-        return self.get_offline_traj(traj_len=3)
-
-    def feed_data(self):
-        self.update_stats(0, None)
-        return
-
-    def compute_loss_q(self, data):
-        states_trj, actions_trj, rewards_trj, next_states_trj, dones_trj = data['obs'], data['act'], data['reward'], data['obs2'], data['done']
-        with torch.no_grad():
-            next_actions, log_probs = self.ac.pi(next_states_trj[0])
-        min_Q, _, _ = self.get_q_value_target(next_states_trj[0], next_actions)
-        q_target = rewards_trj[0] + self.gamma * (1 - dones_trj[0]) * (min_Q - self.tau * log_probs)
-        minq, q1, q2 = self.get_q_value(states_trj[0], actions_trj[0], with_grad=True)
-        
-        weight = 1
-        cutoff = []
-        with torch.no_grad():
-            for i in range(len(states_trj)):
-                a, lp = self.ac.pi(states_trj[i])
-                beh_lp = self.beh_pi.get_logprob(states_trj[i], a)
-                rho_t = torch.clip(torch.exp(lp - beh_lp), -np.inf, 1)
-                co = torch_utils.to_np(torch.where(dones_trj[i] == 1)[0])
-                cutoff += list(co)
-                rho_t[cutoff] = 1
-                weight *= rho_t
-        
-        critic1_loss = (0.5 * (q_target - q1) ** 2 * weight).mean()
-        critic2_loss = (0.5 * (q_target - q2) ** 2 * weight).mean()
-        loss_q = (critic1_loss + critic2_loss) * 0.5
-        q_info = minq.detach().numpy()
-        return loss_q, q_info
-
-    def update(self, data):
-        data_t0 = {}
-        for k in data.keys():
-            data_t0[k] = data[k][0]
-        
-        loss_beta = self.update_beta(data_t0).item()
-    
-        self.value_optimizer.zero_grad()
-        loss_vs, v_info, logp_info = self.compute_loss_value(data_t0)
-        loss_vs.backward()
-        self.value_optimizer.step()
-    
-        loss_q, qinfo = self.compute_loss_q(data)
-        self.q_optimizer.zero_grad()
-        loss_q.backward()
-        self.q_optimizer.step()
-    
-        loss_pi, _ = self.compute_loss_pi(data_t0)
-        self.pi_optimizer.zero_grad()
-        loss_pi.backward()
-        self.pi_optimizer.step()
-    
-        if self.cfg.use_target_network and self.total_steps % self.cfg.target_network_update_freq == 0:
-            self.sync_target()
-
-
-class InSampleUniform(InSampleACOnline):
-    def __init__(self, cfg):
-        super(InSampleUniform, self).__init__(cfg)
-        self.offline_param_init()
-        if self.cfg.pretrain_beta:
-            for i in range(20000):
-                data = self.get_offline_data()
-                self.update_beta(data)
-        self.probs = self.gaussian_mixer()
-
-    def get_data(self):
-        return self.get_uniform_offline_data(self.probs)
-
-    def feed_data(self):
-        self.update_stats(0, None)
-        return
-
-    def gaussian_mixer(self):
-        states = self.trainset[0]
-        n_components = self.cfg.gaussian_n_components
-        clusters = GaussianMixture(n_components=n_components).fit_predict(states)
-        probs = np.zeros(len(states))
-        for c in range(n_components):
-            same_cluster = np.where(clusters == c)[0]
-            probs[same_cluster] = (1.0/n_components) / len(same_cluster)
-        return probs
