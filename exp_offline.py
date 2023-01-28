@@ -14,14 +14,16 @@ from utils import torch_utils, logger, run_funcs
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="run_file")
     parser.add_argument('--id', default=0, type=int, help='random seed')
-    parser.add_argument('--agent', default="InAC")
-    parser.add_argument('--env', default='HalfCheetah')
-    parser.add_argument('--dataset', default='medium')
-    parser.add_argument('--learning-rate', default=3e-4)
-    parser.add_argument('--temperature', default=0.1)
-    parser.add_argument('--continuous-action', default=True)
+    parser.add_argument('--agent', type=str, default="InAC")
+    parser.add_argument('--env', type=str, default='HalfCheetah')
+    parser.add_argument('--dataset', type=str, default='medium')
+    parser.add_argument('--learning-rate', type=float, default=3e-4)
+    parser.add_argument('--temperature', type=float, default=0.1)
+    parser.add_argument('--continuous-action', type=int, default=1)
+    parser.add_argument('--log-interv', type=int, default=10000)
+    parser.add_argument('--max-steps', type=int, default=1000000)
+    parser.add_argument('--timeout', type=int, default=1000)
     args = parser.parse_args()
-
     torch_utils.set_one_thread()
 
     project_root = os.path.abspath(os.path.dirname(__file__))
@@ -53,26 +55,30 @@ if __name__ == '__main__':
     # Initializing the agent and running the experiment
     if args.agent == 'InAC':
         agent_obj = inac_agent.InSampleAC(
-            project_root,
-            log_dir,
-            logger,
-            device,
-            args.id,
-            env,
-            eval_env,
-            policy_fn,
-            critic_fn,
-            state_value_fn,
-            learning_rate=3e-4,
-            temperature=0.1,
+            project_root=project_root,
+            log_dir=log_dir,
+            logger=logger,
+            device=device,
+            id_=args.id,
+            env=env,
+            eval_env=eval_env,
+            policy_fn=policy_fn,
+            critic_fn=critic_fn,
+            state_value_fn=state_value_fn,
+            learning_rate=args.learning_rate,
+            temperature=args.temperature,
             load_actor_fn_path=None,
             load_critic_fn_path=None,
             load_val_fn_path=None,
             load_offline_data=True,
             offline_data=offline_data,
-            continuous_action=True,
-            offline_setting=True
+            continuous_action=args.continuous_action,
+            offline_setting=True,
+            timeout=args.timeout
         )
     else:
         raise NotImplementedError
-    run_funcs.run_steps(agent_obj)
+    run_funcs.run_steps(agent_obj,
+                        log_interval=args.log_interv,
+                        eval_interval=args.log_interv,
+                        max_steps=args.max_steps)

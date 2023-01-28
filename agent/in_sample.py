@@ -28,7 +28,8 @@ class InSampleAC(base.Agent):
                  load_offline_data=True,
                  offline_data=None,
                  continuous_action=True,
-                 offline_setting=True
+                 offline_setting=True,
+                 timeout=1000
                  ):
         super(InSampleAC, self).__init__(
             project_root=project_root,
@@ -40,7 +41,8 @@ class InSampleAC(base.Agent):
             device=device,
             offline_data=offline_data,
             load_offline_data=load_offline_data,
-            offline_setting=offline_setting
+            offline_setting=offline_setting,
+            timeout=timeout
         )
         q1q2 = critic_fn
         pi = policy_fn
@@ -83,11 +85,12 @@ class InSampleAC(base.Agent):
 
         self.tau = temperature
         
-        if offline_setting:
-            self.offline_param_init()
-            self.feed_data = self.feed_data_offline
-        else:
-            self.feed_data = self.feed_data_online
+        self.offline_param_init()
+        # if offline_setting:
+        #     self.offline_param_init()
+        #     self.feed_data = self.feed_data_offline
+        # else:
+        #     self.feed_data = self.feed_data_online
 
     def compute_loss_beh_pi(self, data):
         """L_{\omega}, learn behavior policy"""
@@ -186,22 +189,6 @@ class InSampleAC(base.Agent):
         path = os.path.join(parameters_dir, "vs_net")
         torch.save(self.value_net.state_dict(), path)
 
-    def feed_data_offline(self):
-        self.update_stats(0, None)
-        return
-
-    def feed_data_online(self):
-        if self.reset is True:
-            self.state = self.env.reset()
-            self.reset = False
-        action = self.policy(self.state, eval=False)
-        next_state, reward, done, _ = self.env.step([action])
-        self.replay.feed([self.state, action, reward, next_state, int(done)])
-        prev_state = self.state
-        self.state = next_state
-        self.update_stats(reward, done)
-        return prev_state, action, reward, next_state, int(done)
-
     def load_actor_fn(self, parameters_dir):
         path = os.path.join(self.project_root, parameters_dir)
         self.ac.pi.load_state_dict(torch.load(path, map_location=self.device))
@@ -226,16 +213,15 @@ class InSampleAC(base.Agent):
         a = torch_utils.to_np(a)
         return a
 
-    def eval_step(self, state):
-        a = self.policy(state, eval=True)
-        return a
-
     def sync_target(self):
         with torch.no_grad():
             for p, p_targ in zip(self.ac.q1q2.parameters(), self.ac_targ.q1q2.parameters()):
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
-
+            for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
+                p_targ.data.mul_(self.polyak)
+                p_targ.data.add_((1 - self.polyak) * p.data)
+                
     def get_q_value_discrete(self, o, a, with_grad=False):
         if with_grad:
             q1_pi, q2_pi = self.ac.q1q2(o)

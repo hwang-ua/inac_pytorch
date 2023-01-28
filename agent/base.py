@@ -22,6 +22,8 @@ class Replay:
         else:
             self.data[self.pos] = experience
         self.pos = (self.pos + 1) % self.memory_size
+        if (self.pos + 1) >= self.memory_size:
+            print("Buffer is full")
     
     def feed_batch(self, experience):
         for exp in experience:
@@ -30,7 +32,7 @@ class Replay:
     def sample(self, batch_size=None):
         if batch_size is None:
             batch_size = self.batch_size
-        sampled_indices = [self.rng.randint(0, len(self.data)) for _ in range(batch_size)]
+        sampled_indices = self.rng.randint(0, len(self.data), size=batch_size)#[self.rng.randint(0, len(self.data)) for _ in range(batch_size)]
         sampled_data = [self.data[ind] for ind in sampled_indices]
         batch_data = list(map(lambda x: np.asarray(x), zip(*sampled_data)))
         return batch_data
@@ -72,7 +74,8 @@ class Agent:
                  device,
                  offline_data=None,
                  load_offline_data=True,
-                 offline_setting=True
+                 offline_setting=True,
+                 timeout=1000
                  ):
         if offline_setting: assert load_offline_data
         self.offline_setting = offline_setting
@@ -82,12 +85,12 @@ class Agent:
         self.log_dir = log_dir
         self.logger = logger
         self.gamma = 0.99
-        self.timeout = 1000
+        self.timeout = timeout
         self.env = env
         self.memory_size = 2000000
         self.batch_size = 256
         self.replay = Replay(memory_size=self.memory_size, batch_size=self.batch_size, seed=id_)
-        self.eval_env = eval_env #copy.deepcopy(env)
+        self.eval_env = eval_env
         self.state_normalizer = lambda x: x
         
         self.episode_reward = 0
@@ -97,7 +100,7 @@ class Agent:
         self.ep_steps = 0
         self.num_episodes = 0
         self.stats_queue_size = 5
-        self.batch_indices = torch.arange(self.batch_size).long().to(device)
+        # self.batch_indices = torch.arange(self.batch_size).long().to(device)
         self.ep_returns_queue_train = np.zeros(self.stats_queue_size)
         self.ep_returns_queue_test = np.zeros(self.stats_queue_size)
         self.train_stats_counter = 0
@@ -107,7 +110,7 @@ class Agent:
         
         self.populate_latest = False
         self.populate_states, self.populate_actions, self.populate_true_qs = None, None, None
-        self.automatic_tmp_tuning = False
+        # self.automatic_tmp_tuning = False
         
         self.state = None
         self.action = None
@@ -120,49 +123,81 @@ class Agent:
         
     
     def offline_param_init(self):
-        # self.trainset, self.testset = self.training_set_construction(self.offline_data)
-        # self.training_size = len(self.trainset[0])
-        # self.training_indexs = np.arange(self.training_size)
         self.training_loss = []
         self.test_loss = []
         self.tloss_increase = 0
         self.tloss_rec = np.inf
-        # assert self.training_size >= self.memory_size
         # self.fill_offline_data_to_buffer()
         
     def feed_data(self):
         return
     
-    def get_data(self):
-        states, actions, rewards, next_states, terminals = self.replay.sample()
-        in_ = torch_utils.tensor(self.state_normalizer(states), self.device)
-        r = torch_utils.tensor(rewards, self.device)
-        ns = torch_utils.tensor(self.state_normalizer(next_states), self.device)
-        t = torch_utils.tensor(terminals, self.device)
+    def feed_data_offline(self):
+        self.update_stats(0, None)
+        return
+
+    # def feed_data_online(self):
+    #     if self.reset is True:
+    #         self.state = self.env.reset()
+    #         self.reset = False
+    #     action = self.policy(self.state, eval=False)
+    #     next_state, reward, done, _ = self.env.step([action])
+    #     self.replay.feed([self.state, action, reward, next_state, int(done)])
+    #     prev_state = self.state
+    #     self.state = next_state
+    #     self.update_stats(reward, done)
+    #     return prev_state, action, reward, next_state, int(done)
+
+    # def get_data_online(self):
+    #     states, actions, rewards, next_states, terminals = self.replay.sample()
+    #     in_ = torch_utils.tensor(self.state_normalizer(states), self.device)
+    #     r = torch_utils.tensor(rewards, self.device)
+    #     ns = torch_utils.tensor(self.state_normalizer(next_states), self.device)
+    #     t = torch_utils.tensor(terminals, self.device)
+    #     data = {
+    #         'obs': in_,
+    #         'act': actions,
+    #         'reward': r,
+    #         'obs2': ns,
+    #         'done': t
+    #     }
+    #     return data
+    def get_data_offline(self):
+        train_s, train_a, train_r, train_ns, train_t = self.trainset
+        idxs = self.agent_rng.randint(0, len(train_s), size=self.batch_size) \
+            if self.batch_size < len(train_s) else np.arange(len(train_s))
+        in_ = torch_utils.tensor(self.state_normalizer(train_s[idxs]), self.device)
+        act = train_a[idxs]
+        r = torch_utils.tensor(train_r[idxs], self.device)
+        ns = torch_utils.tensor(self.state_normalizer(train_ns[idxs]), self.device)
+        t = torch_utils.tensor(train_t[idxs], self.device)
         data = {
             'obs': in_,
-            'act': actions,
+            'act': act,
             'reward': r,
             'obs2': ns,
-            'done': t
+            'done': t,
         }
         return data
+
     
-    def fill_offline_data_to_buffer(self):
-        self.trainset, self.testset = self.training_set_construction(self.offline_data)
-        self.training_size = len(self.trainset[0])
-        self.training_indexs = np.arange(self.training_size)
-        train_s, train_a, train_r, train_ns, train_t, _, _, _, _ = self.trainset
-        for idx in range(len(train_s)):
-            self.replay.feed([train_s[idx], train_a[idx], train_r[idx], train_ns[idx], train_t[idx]])
-        if self.memory_size < self.training_size:
-            self.logger.info("\nWARNING: Buffer size is less than training set size, {} vs {}\n".format(self.memory_size, self.training_size))
+    # def fill_offline_data_to_buffer(self):
+    #     # self.trainset, self.testset = self.training_set_construction(self.offline_data)
+    #     self.trainset = self.training_set_construction(self.offline_data)
+    #     self.training_size = len(self.trainset[0])
+    #     self.training_indexs = np.arange(self.training_size)
+    #     train_s, train_a, train_r, train_ns, train_t = self.trainset
+    #     for idx in range(len(train_s)):
+    #         self.replay.feed([train_s[idx], train_a[idx], train_r[idx], train_ns[idx], train_t[idx]])
+    #     assert self.memory_size >= self.training_size
 
     def step(self):
-        trans = self.feed_data()
-        data = self.get_data()
+        # trans = self.feed_data()
+        # data = self.get_data()
+        self.update_stats(0, None)
+        data = self.get_data_offline()
         losses = self.update(data)
-        return trans, losses
+        return losses
     
     def update(self, data):
         raise NotImplementedError
@@ -176,7 +211,6 @@ class Agent:
         self.episode_reward += reward
         self.total_steps += 1
         self.ep_steps += 1
-        # print(self.ep_steps, self.total_steps, done)
         if done or self.ep_steps == self.timeout:
             self.episode_rewards.append(self.episode_reward)
             self.num_episodes += 1
@@ -208,19 +242,9 @@ class Agent:
             total_actions += traj[1]
             total_returns += traj[2]
             self.add_test_log(ep_return)
-            if initialize:
-                self.add_train_log(ep_return)
+            # if initialize:
+            #     self.add_train_log(ep_return)
         return [total_states, total_actions, total_returns]
-    
-    def random_fill_buffer(self, total_steps):
-        state = self.eval_env.reset()
-        for _ in range(total_steps):
-            action = self.agent_rng.randint(0, self.env.action_dim)
-            last_state = state
-            state, reward, done, _ = self.eval_env.step([action])
-            self.replay.feed([last_state, action, reward, state, int(done)])
-            if done:
-                state = self.eval_env.reset()
     
     def eval_episode(self, log_traj=False):
         ep_traj = []
@@ -267,9 +291,8 @@ class Agent:
         return mean, median, min_, max_
     
     def log_file(self, elapsed_time=-1, test=True):
-        if not self.offline_setting:
-            mean, median, min_, max_ = self.log_return(self.ep_returns_queue_train, "TRAIN", elapsed_time)
-        # self.populate_returns()
+        # if not self.offline_setting:
+        #     mean, median, min_, max_ = self.log_return(self.ep_returns_queue_train, "TRAIN", elapsed_time)
         if test:
             self.populate_states, self.populate_actions, self.populate_true_qs = self.populate_returns(log_traj=True)
             self.populate_latest = True
@@ -280,13 +303,12 @@ class Agent:
             except:
                 pass
     
-    def policy(self, state, eps):
+    def policy(self, state, **kwargs):
         raise NotImplementedError
     
     def eval_step(self, state):
-        # action = self.policy(state, 0)
-        # return action
-        raise NotImplementedError
+        a = self.policy(state, eval=True)
+        return a
     
     def save(self):
         raise NotImplementedError
@@ -302,24 +324,22 @@ class Agent:
         rewards = data_dict['rewards']
         next_states = data_dict['next_states']
         terminations = data_dict['terminations']
-        next_actions = np.concatenate([data_dict['actions'][1:], data_dict['actions'][-1:]])  # Should not be used when using the current estimation in target construction
+        return [states, actions, rewards, next_states, terminations]
 
-        thrshd = int(len(states))
-        training_s = states[: thrshd]
-        training_a = actions[: thrshd]
-        training_r = rewards[: thrshd]
-        training_ns = next_states[: thrshd]
-        training_t = terminations[: thrshd]
-        training_na = next_actions[: thrshd]
-        
-        testing_s = states[thrshd:]
-        testing_a = actions[thrshd:]
-        testing_r = rewards[thrshd:]
-        testing_ns = next_states[thrshd:]
-        testing_t = terminations[thrshd:]
-        testing_na = next_actions[thrshd:]
-        
-        return [training_s, training_a, training_r, training_ns, training_t, training_na, None, None, None], \
-               [testing_s, testing_a, testing_r, testing_ns, testing_t, testing_na, None, None, None]
+        # thrshd = int(len(states))
+        # training_s = states[: thrshd]
+        # training_a = actions[: thrshd]
+        # training_r = rewards[: thrshd]
+        # training_ns = next_states[: thrshd]
+        # training_t = terminations[: thrshd]
+        #
+        # testing_s = states[thrshd:]
+        # testing_a = actions[thrshd:]
+        # testing_r = rewards[thrshd:]
+        # testing_ns = next_states[thrshd:]
+        # testing_t = terminations[thrshd:]
+        #
+        # return [training_s, training_a, training_r, training_ns, training_t], \
+        #        [testing_s, testing_a, testing_r, testing_ns, testing_t]
 
 

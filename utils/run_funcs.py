@@ -6,6 +6,7 @@ import gym
 import d4rl
 
 def load_testset(env_name, dataset, id):
+    path = None
     if env_name == 'HalfCheetah':
         if dataset == 'expert':
             path = {"env": "halfcheetah-expert-v2"}
@@ -43,21 +44,21 @@ def load_testset(env_name, dataset, id):
         elif dataset == 'medrep':
             path = {"env": "ant-medium-replay-v2"}
 
-    # elif env_name == 'Acrobot':
-    #     if dataset == 'expert':
-    #         path = {"pkl": "data/dataset/acrobot/transitions_50k/train_40k/{}_run.pkl".format(id)}
-    #     elif dataset == 'mixed':
-    #         path = {"pkl": "data/dataset/acrobot/transitions_50k/train_mixed/{}_run.pkl".format(id)}
-    # elif env_name == 'LunarLander':
-    #     if dataset == 'expert':
-    #         path = {"pkl": "data/dataset/lunar_lander/transitions_50k/train_500k/{}_run.pkl".format(id)}
-    #     elif dataset == 'mixed':
-    #         path = {"pkl": "data/dataset/lunar_lander/transitions_50k/train_mixed/{}_run.pkl".format(id)}
-    # elif env_name == 'MountainCar':
-    #     if dataset == 'expert':
-    #         path = {"pkl": "data/dataset/mountain_car/transitions_50k/train_60k/{}_run.pkl".format(id)}
-    #     elif dataset == 'mixed':
-    #         path = {"pkl": "data/dataset/mountain_car/transitions_50k/train_mixed/{}_run.pkl".format(id)}
+    elif env_name == 'Acrobot':
+        if dataset == 'expert':
+            path = {"pkl": "dataset/acrobot/transitions_50k/train_40k/{}_run.pkl".format(id)}
+        elif dataset == 'mixed':
+            path = {"pkl": "dataset/acrobot/transitions_50k/train_mixed/{}_run.pkl".format(id)}
+    elif env_name == 'LunarLander':
+        if dataset == 'expert':
+            path = {"pkl": "dataset/lunar_lander/transitions_50k/train_500k/{}_run.pkl".format(id)}
+        elif dataset == 'mixed':
+            path = {"pkl": "dataset/lunar_lander/transitions_50k/train_mixed/{}_run.pkl".format(id)}
+    elif env_name == 'MountainCar':
+        if dataset == 'expert':
+            path = {"pkl": "dataset/mountain_car/transitions_50k/train_60k/{}_run.pkl".format(id)}
+        elif dataset == 'mixed':
+            path = {"pkl": "dataset/mountain_car/transitions_50k/train_mixed/{}_run.pkl".format(id)}
     
     assert path is not None
     testsets = {}
@@ -86,19 +87,17 @@ def load_testset(env_name, dataset, id):
         return {}
 
 def run_steps(agent,
-              warm_up_step=0,
-              log_interval=10000,
-              eval_interval=10000,
-              max_steps=1000000
+              log_interval,
+              eval_interval,
+              max_steps
               ):
     t0 = time.time()
     agent.populate_returns(initialize=True)
-    agent.random_fill_buffer(warm_up_step)
     while True:
         if log_interval and not agent.total_steps % log_interval:
             agent.log_file(elapsed_time=log_interval / (time.time() - t0), test=(not agent.total_steps % eval_interval))
             t0 = time.time()
         if max_steps and agent.total_steps >= max_steps:
             break
-        seq, loss_dict = agent.step()
+        loss_dict = agent.step()
     agent.save()
