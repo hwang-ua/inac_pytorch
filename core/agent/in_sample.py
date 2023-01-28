@@ -104,21 +104,21 @@ class InSampleACOnline(base.Agent):
                 p_targ.data.add_((1 - self.polyak) * p.data)
 
     def load_actor_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.ac.pi.load_state_dict(torch.load(path, map_location=self.cfg.device))
+        path = os.path.join(self.data_root, parameters_dir)
+        self.ac.pi.load_state_dict(torch.load(path, map_location=self.device))
         self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
-        self.cfg.logger.info("Load actor function from {}".format(path))
+        self.logger.info("Load actor function from {}".format(path))
 
     def load_critic_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.cfg.device))
+        path = os.path.join(self.data_root, parameters_dir)
+        self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.device))
         self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
-        self.cfg.logger.info("Load critic function from {}".format(path))
+        self.logger.info("Load critic function from {}".format(path))
 
     def load_state_value_fn(self, parameters_dir):
-        path = os.path.join(self.cfg.data_root, parameters_dir)
-        self.value_net.load_state_dict(torch.load(path, map_location=self.cfg.device))
-        self.cfg.logger.info("Load state value function from {}".format(path))
+        path = os.path.join(self.data_root, parameters_dir)
+        self.value_net.load_state_dict(torch.load(path, map_location=self.device))
+        self.logger.info("Load state value function from {}".format(path))
 
     #-----------------------------------------------------------------------------------------------
     def compute_loss_beh_pi(self, data):
@@ -204,7 +204,7 @@ class InSampleACOnline(base.Agent):
         loss_pi.backward()
         self.pi_optimizer.step()
         
-        if self.cfg.use_target_network and self.total_steps % self.cfg.target_network_update_freq == 0:
+        if self.use_target_network and self.total_steps % self.target_network_update_freq == 0:
             self.sync_target()
 
         return {"beta": loss_beta,
@@ -217,7 +217,7 @@ class InSampleACOnline(base.Agent):
                 }
 
     def save(self):
-        parameters_dir = self.cfg.get_parameters_dir()
+        parameters_dir = self.parameters_dir
         path = os.path.join(parameters_dir, "actor_net")
         torch.save(self.ac.pi.state_dict(), path)
     

@@ -17,6 +17,7 @@ class Agent:
         self.seed = cfg.seed
         self.use_target_network = cfg.use_target_network
         self.target_network_update_freq = cfg.target_network_update_freq
+        self.parameters_dir = cfg.get_parameters_dir()
 
         self.batch_size = cfg.batch_size
         # self.batch_indices = torch.arange(self.batch_size).long().to(self.device)
