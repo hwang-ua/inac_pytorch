@@ -14,7 +14,7 @@ class Ant:
         self.state_dim = (111,)
         self.action_dim = 8
         # self.env = gym.make('Ant-v2')
-        self.env = gym.make('ant-expert-v2')# Loading d4rl env. For the convinience of getting normalized score from d4rl
+        self.env = gym.make('ant-random-v2')# Loading d4rl env. For the convinience of getting normalized score from d4rl
         self.env.unwrapped.seed(seed)
         self.env._max_episode_steps = np.inf # control timeout setting in agent
         self.state = None

@@ -63,26 +63,38 @@ class Replay:
 
 
 class Agent:
-    def __init__(self, cfg):
-        self.exp_path = cfg.exp_path
-        self.seed = cfg.seed
-        self.use_target_network = cfg.use_target_network
-        self.target_network_update_freq = cfg.target_network_update_freq
+    def __init__(self,
+                 exp_path,
+                 seed,
+                 env_fn,
+                 timeout,
+                 gamma,
+                 offline_data,
+                 action_dim,
+                 batch_size,
+                 use_target_network,
+                 target_network_update_freq,
+                 evaluation_criteria,
+                 logger
+                 ):
+        self.exp_path = exp_path
+        self.seed = seed
+        self.use_target_network = use_target_network
+        self.target_network_update_freq = target_network_update_freq
         self.parameters_dir = self.get_parameters_dir()
 
-        self.batch_size = cfg.batch_size
-        # self.batch_indices = torch.arange(self.batch_size).long().to(self.device)
-        self.env = cfg.env_fn()
-        self.eval_env = copy.deepcopy(cfg.env_fn)()
-        self.offline_data = cfg.offline_data
-        self.replay = Replay(memory_size=2000000, batch_size=cfg.batch_size, seed=cfg.seed)#cfg.replay_fn()
-        self.state_normalizer = lambda x: x #cfg.state_normalizer
-        self.evaluation_criteria = cfg.evaluation_criteria
-        self.logger = cfg.logger
-        self.timeout = cfg.timeout
-        self.action_dim = cfg.action_dim
+        self.batch_size = batch_size
+        self.env = env_fn()
+        self.eval_env = copy.deepcopy(env_fn)()
+        self.offline_data = offline_data
+        self.replay = Replay(memory_size=2000000, batch_size=batch_size, seed=seed)
+        self.state_normalizer = lambda x: x
+        self.evaluation_criteria = evaluation_criteria
+        self.logger = logger
+        self.timeout = timeout
+        self.action_dim = action_dim
 
-        self.gamma = cfg.gamma
+        self.gamma = gamma
         self.device = 'cpu'
         self.stats_queue_size = 5
         self.episode_reward = 0

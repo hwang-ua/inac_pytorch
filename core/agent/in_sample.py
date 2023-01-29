@@ -8,22 +8,55 @@ from core.network.policy_factory import MLPCont, MLPDiscrete
 from core.network.network_architectures import DoubleCriticNetwork, DoubleCriticDiscrete, FCNetwork
 
 class InSampleAC(base.Agent):
-    def __init__(self, cfg):
-        super(InSampleAC, self).__init__(cfg)
-        # self.cfg = cfg
+    # def __init__(self, cfg):
+    def __init__(self,
+                 device,
+                 discrete_control,
+                 state_dim,
+                 action_dim,
+                 hidden_units,
+                 learning_rate,
+                 tau,
+                 polyak,
+                 exp_path,
+                 seed,
+                 env_fn,
+                 timeout,
+                 gamma,
+                 offline_data,
+                 batch_size,
+                 use_target_network,
+                 target_network_update_freq,
+                 evaluation_criteria,
+                 logger
+                 ):
+        super(InSampleAC, self).__init__(
+            exp_path=exp_path,
+            seed=seed,
+            env_fn=env_fn,
+            timeout=timeout,
+            gamma=gamma,
+            offline_data=offline_data,
+            action_dim=action_dim,
+            batch_size=batch_size,
+            use_target_network=use_target_network,
+            target_network_update_freq=target_network_update_freq,
+            evaluation_criteria=evaluation_criteria,
+            logger=logger
+        )
         
         def get_policy_func():
-            if cfg.discrete_control:
-                pi = MLPDiscrete(cfg.device, cfg.state_dim, cfg.action_dim, [cfg.hidden_units]*2)
+            if discrete_control:
+                pi = MLPDiscrete(device, state_dim, action_dim, [hidden_units]*2)
             else:
-                pi = MLPCont(cfg.device, cfg.state_dim, cfg.action_dim, [cfg.hidden_units]*2)
+                pi = MLPCont(device, state_dim, action_dim, [hidden_units]*2)
             return pi
 
         def get_critic_func():
-            if cfg.discrete_control:
-                q1q2 = DoubleCriticDiscrete(cfg.device, cfg.state_dim, [cfg.hidden_units]*2, cfg.action_dim)
+            if discrete_control:
+                q1q2 = DoubleCriticDiscrete(device, state_dim, [hidden_units]*2, action_dim)
             else:
-                q1q2 = DoubleCriticNetwork(cfg.device, cfg.state_dim, cfg.action_dim, [cfg.hidden_units]*2)
+                q1q2 = DoubleCriticNetwork(device, state_dim, action_dim, [hidden_units]*2)
             return q1q2
             
         pi = get_policy_func()
@@ -39,7 +72,7 @@ class InSampleAC(base.Agent):
         self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
         self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
         self.beh_pi = get_policy_func()
-        self.value_net = FCNetwork(cfg.device, np.prod(cfg.state_dim), [cfg.hidden_units]*2, 1)
+        self.value_net = FCNetwork(device, np.prod(state_dim), [hidden_units]*2, 1)
 
         # if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
         #     self.load_actor_fn(cfg.policy_fn_config['path'])
@@ -48,26 +81,26 @@ class InSampleAC(base.Agent):
         # if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
         #     self.load_state_value_fn(cfg.val_fn_config['path'])
 
-        self.pi_optimizer = torch.optim.Adam(list(self.ac.pi.parameters()), cfg.learning_rate)
-        self.q_optimizer = torch.optim.Adam(list(self.ac.q1q2.parameters()), cfg.learning_rate)
-        self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), cfg.learning_rate)
-        self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
+        self.pi_optimizer = torch.optim.Adam(list(self.ac.pi.parameters()), learning_rate)
+        self.q_optimizer = torch.optim.Adam(list(self.ac.q1q2.parameters()), learning_rate)
+        self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), learning_rate)
+        self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), learning_rate)
         self.exp_threshold = 10000
-        if cfg.discrete_control:
+        if discrete_control:
             self.get_q_value = self.get_q_value_discrete
             self.get_q_value_target = self.get_q_value_target_discrete
         else:
             self.get_q_value = self.get_q_value_cont
             self.get_q_value_target = self.get_q_value_target_cont
 
-        self.tau = cfg.tau
-        self.polyak = cfg.polyak #0 is hard sync
+        self.tau = tau
+        self.polyak = polyak #0 is hard sync
         self.offline_learning = True
         self.fill_offline_data_to_buffer()
         if self.offline_learning:
             self.offline_param_init()
             self.get_data = self.get_offline_data
-            self.feed_data = self.feed_data_offline
+            self.feed_data = lambda : self.update_stats(0, None)
         return
 
 
@@ -166,10 +199,6 @@ class InSampleAC(base.Agent):
                 "logp_info": logp_info.mean(),
                 }
 
-
-    def feed_data_offline(self):
-        self.update_stats(0, None)
-        return
 
     def get_q_value_discrete(self, o, a, with_grad=False):
         if with_grad:
