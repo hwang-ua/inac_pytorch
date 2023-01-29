@@ -14,7 +14,7 @@ class Hopper:
         self.state_dim = (11,)
         self.action_dim = 3
         # self.env = gym.make('Hopper-v2')
-        self.env = gym.make('hopper-expert-v2')
+        self.env = gym.make('hopper-expert-v2') # Loading d4rl env. For the convinience of getting normalized score from d4rl
         self.env.unwrapped.seed(seed)
         self.env._max_episode_steps = np.inf # control timeout setting in agent
         self.state = None

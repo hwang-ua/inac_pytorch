@@ -18,7 +18,6 @@ if __name__ == '__main__':
 
     project_root = os.path.abspath(os.path.dirname(__file__))
     cfg = Sweeper(project_root, args.config_file).parse(args.id)
-    # cfg.device = torch_utils.select_device(args.device)
     torch_utils.random_seed(cfg.seed)
 
     cfg.env_fn = environment.EnvFactory.create_env_fn(cfg)
