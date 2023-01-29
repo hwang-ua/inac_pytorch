@@ -10,20 +10,20 @@ from core.network.network_architectures import DoubleCriticNetwork, DoubleCritic
 class InSampleAC(base.Agent):
     def __init__(self, cfg):
         super(InSampleAC, self).__init__(cfg)
-        self.cfg = cfg
+        # self.cfg = cfg
         
         def get_policy_func():
-            if cfg.policy_fn_config['policy_type'] == "policy-cont":
-                pi = MLPCont(cfg.device, np.prod(cfg.policy_fn_config['in_dim']), cfg.action_dim, cfg.policy_fn_config['hidden_units'])
-            elif cfg.policy_fn_config['policy_type'] == 'policy-discrete':
-                pi = MLPDiscrete(cfg.device, np.prod(cfg.policy_fn_config['in_dim']), cfg.action_dim, cfg.policy_fn_config['hidden_units'])
+            if cfg.discrete_control:
+                pi = MLPDiscrete(cfg.device, cfg.state_dim, cfg.action_dim, [cfg.hidden_units]*2)
+            else:
+                pi = MLPCont(cfg.device, cfg.state_dim, cfg.action_dim, [cfg.hidden_units]*2)
             return pi
 
         def get_critic_func():
-            if cfg.critic_fn_config['network_type'] == 'fc':
-                q1q2 = DoubleCriticDiscrete(cfg.device, np.prod(cfg.critic_fn_config['in_dim']), cfg.critic_fn_config['hidden_units'], cfg.critic_fn_config.get('out_dim', cfg.action_dim))
-            elif cfg.critic_fn_config['network_type'] == 'fc-insert-input':
-                q1q2 = DoubleCriticNetwork(cfg.device, np.prod(cfg.critic_fn_config['in_dim']), cfg.action_dim, cfg.critic_fn_config['hidden_units'])
+            if cfg.discrete_control:
+                q1q2 = DoubleCriticDiscrete(cfg.device, cfg.state_dim, [cfg.hidden_units]*2, cfg.action_dim)
+            else:
+                q1q2 = DoubleCriticNetwork(cfg.device, cfg.state_dim, cfg.action_dim, [cfg.hidden_units]*2)
             return q1q2
             
         pi = get_policy_func()
@@ -39,7 +39,7 @@ class InSampleAC(base.Agent):
         self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
         self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
         self.beh_pi = get_policy_func()
-        self.value_net = FCNetwork(cfg.device, np.prod(cfg.val_fn_config['in_dim']), cfg.val_fn_config['hidden_units'], 1)
+        self.value_net = FCNetwork(cfg.device, np.prod(cfg.state_dim), [cfg.hidden_units]*2, 1)
 
         # if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
         #     self.load_actor_fn(cfg.policy_fn_config['path'])
@@ -52,8 +52,8 @@ class InSampleAC(base.Agent):
         self.q_optimizer = torch.optim.Adam(list(self.ac.q1q2.parameters()), cfg.learning_rate)
         self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), cfg.learning_rate)
         self.beh_pi_optimizer = torch.optim.Adam(list(self.beh_pi.parameters()), cfg.learning_rate)
-        self.exp_threshold = cfg.exp_threshold
-        if self.cfg.discrete_control:
+        self.exp_threshold = 10000
+        if cfg.discrete_control:
             self.get_q_value = self.get_q_value_discrete
             self.get_q_value_target = self.get_q_value_target_discrete
         else:

@@ -64,11 +64,11 @@ class Replay:
 
 class Agent:
     def __init__(self, cfg):
-        self.data_root = cfg.data_root
+        self.exp_path = cfg.exp_path
         self.seed = cfg.seed
         self.use_target_network = cfg.use_target_network
         self.target_network_update_freq = cfg.target_network_update_freq
-        self.parameters_dir = cfg.get_parameters_dir()
+        self.parameters_dir = self.get_parameters_dir()
 
         self.batch_size = cfg.batch_size
         # self.batch_indices = torch.arange(self.batch_size).long().to(self.device)
@@ -82,7 +82,7 @@ class Agent:
         self.timeout = cfg.timeout
         self.action_dim = cfg.action_dim
 
-        self.gamma = 0.99
+        self.gamma = cfg.gamma
         self.device = 'cpu'
         self.stats_queue_size = 5
         self.episode_reward = 0
@@ -105,8 +105,11 @@ class Agent:
         self.action = None
         self.next_state = None
         self.eps = 1e-8
-        
-        self.temp = 0
+
+    def get_parameters_dir(self):
+        d = os.path.join(self.exp_path, "parameters")
+        torch_utils.ensure_dir(d)
+        return d
 
     def offline_param_init(self):
         self.trainset = self.training_set_construction(self.offline_data)
