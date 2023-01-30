@@ -1,30 +1,32 @@
-import os
-os.environ['D4RL_SUPPRESS_IMPORT_ERROR'] = '1'
+import math
 
-import gym
-import d4rl
 import numpy as np
+import gym
+import copy
 
+import core.utils.helpers
 from core.utils.torch_utils import random_seed
 
 
-class Walker2d:
+class Acrobot:
     def __init__(self, seed=np.random.randint(int(1e5))):
         random_seed(seed)
-        self.state_dim = (17,)
-        self.action_dim = 6
-        # self.env = gym.make('Walker2d-v2')
-        self.env = gym.make('walker2d-random-v2')# Loading d4rl env. For the convinience of getting normalized score from d4rl
-        self.env.unwrapped.seed(seed)
+        self.state_dim = (6,)
+        self.action_dim = 3
+        self.env = gym.make('Acrobot-v1')
+        self.env._seed = seed
         self.env._max_episode_steps = np.inf # control timeout setting in agent
         self.state = None
 
+    def generate_state(self, coords):
+        return coords
+
     def reset(self):
-        return self.env.reset()
+        self.state = np.asarray(self.env.reset())
+        return self.state
 
     def step(self, a):
-        ret = self.env.step(a[0])
-        state, reward, done, info = ret
+        state, reward, done, info = self.env.step(a[0])
         self.state = state
         # self.env.render()
         return np.asarray(state), np.asarray(reward), np.asarray(done), info
@@ -40,3 +42,4 @@ class Walker2d:
 
     def info(self, key):
         return
+

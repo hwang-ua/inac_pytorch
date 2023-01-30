@@ -40,6 +40,3 @@ class HalfCheetah:
 
     def info(self, key):
         return
-
-    def hack_step(self, current_s, action):
-        raise NotImplementedError

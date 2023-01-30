@@ -1,6 +1,8 @@
 import os
 
 from core.environment.mountaincar import MountainCar
+from core.environment.acrobot import Acrobot
+from core.environment.lunarlander import LunarLander
 from core.environment.halfcheetah import HalfCheetah
 from core.environment.walker2d import Walker2d
 from core.environment.hopper import Hopper
@@ -11,6 +13,10 @@ class EnvFactory:
     def create_env_fn(cls, cfg):
         if cfg.env_name == 'MountainCar':
             return lambda: MountainCar(cfg.seed)
+        elif cfg.env_name == 'Acrobot':
+            return lambda: Acrobot(cfg.seed)
+        elif cfg.env_name == 'LunarLander':
+            return lambda: LunarLander(cfg.seed)
         elif cfg.env_name == 'HalfCheetah':
             return lambda: HalfCheetah(cfg.seed)
         elif cfg.env_name == 'Walker2d':
