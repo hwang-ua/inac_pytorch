@@ -8,7 +8,6 @@ from core.network.policy_factory import MLPCont, MLPDiscrete
 from core.network.network_architectures import DoubleCriticNetwork, DoubleCriticDiscrete, FCNetwork
 
 class InSampleAC(base.Agent):
-    # def __init__(self, cfg):
     def __init__(self,
                  device,
                  discrete_control,
@@ -74,13 +73,6 @@ class InSampleAC(base.Agent):
         self.beh_pi = get_policy_func()
         self.value_net = FCNetwork(device, np.prod(state_dim), [hidden_units]*2, 1)
 
-        # if 'load_params' in self.cfg.policy_fn_config and self.cfg.policy_fn_config['load_params']:
-        #     self.load_actor_fn(cfg.policy_fn_config['path'])
-        # if 'load_params' in self.cfg.critic_fn_config and self.cfg.critic_fn_config['load_params']:
-        #     self.load_critic_fn(cfg.critic_fn_config['path'])
-        # if 'load_params' in self.cfg.val_fn_config and self.cfg.val_fn_config['load_params']:
-        #     self.load_state_value_fn(cfg.val_fn_config['path'])
-
         self.pi_optimizer = torch.optim.Adam(list(self.ac.pi.parameters()), learning_rate)
         self.q_optimizer = torch.optim.Adam(list(self.ac.q1q2.parameters()), learning_rate)
         self.value_optimizer = torch.optim.Adam(list(self.value_net.parameters()), learning_rate)
@@ -94,7 +86,7 @@ class InSampleAC(base.Agent):
             self.get_q_value_target = self.get_q_value_target_cont
 
         self.tau = tau
-        self.polyak = polyak #0 is hard sync
+        self.polyak = polyak
         self.offline_learning = True
         self.fill_offline_data_to_buffer()
         if self.offline_learning:
@@ -118,9 +110,7 @@ class InSampleAC(base.Agent):
         with torch.no_grad():
             actions, log_probs = self.ac.pi(states)
             min_Q, _, _ = self.get_q_value_target(states, actions)
-            # beh_log_prob = self.beh_pi.get_logprob(states, actions)
-            # beh_log_prob = self.ac.pi.get_logprob(states, actions)
-        target = min_Q - self.tau * log_probs#beh_log_prob
+        target = min_Q - self.tau * log_probs
         value_loss = (0.5 * (v_phi - target) ** 2).mean()
         return value_loss, v_phi.detach().numpy(), log_probs.detach().numpy()
     
@@ -141,8 +131,6 @@ class InSampleAC(base.Agent):
         critic1_loss = (0.5 * (q_target - q1) ** 2).mean()
         critic2_loss = (0.5 * (q_target - q2) ** 2).mean()
         loss_q = (critic1_loss + critic2_loss) * 0.5
-        # q_info = dict(Q1Vals=q1.detach().numpy(),
-        #               Q2Vals=q2.detach().numpy())
         q_info = minq.detach().numpy()
         return loss_q, q_info
 
@@ -152,7 +140,6 @@ class InSampleAC(base.Agent):
 
         log_probs = self.ac.pi.get_logprob(states, actions)
         min_Q, _, _ = self.get_q_value(states, actions, with_grad=False)
-        # min_Q, _, _ = self.get_q_value_target(states, actions)
         with torch.no_grad():
             value = self.get_state_value(states)
             beh_log_prob = self.beh_pi.get_logprob(states, actions)
@@ -166,7 +153,6 @@ class InSampleAC(base.Agent):
         self.beh_pi_optimizer.zero_grad()
         loss_beh_pi.backward()
         self.beh_pi_optimizer.step()
-        # print(loss_beh_pi)
         return loss_beh_pi
 
     def update(self, data):
@@ -243,23 +229,6 @@ class InSampleAC(base.Agent):
             for p, p_targ in zip(self.ac.pi.parameters(), self.ac_targ.pi.parameters()):
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
-
-    # def load_actor_fn(self, parameters_dir):
-    #     path = os.path.join(self.data_root, parameters_dir)
-    #     self.ac.pi.load_state_dict(torch.load(path, map_location=self.device))
-    #     self.ac_targ.pi.load_state_dict(self.ac.pi.state_dict())
-    #     self.logger.info("Load actor function from {}".format(path))
-    #
-    # def load_critic_fn(self, parameters_dir):
-    #     path = os.path.join(self.data_root, parameters_dir)
-    #     self.ac.q1q2.load_state_dict(torch.load(path, map_location=self.device))
-    #     self.ac_targ.q1q2.load_state_dict(self.ac.q1q2.state_dict())
-    #     self.logger.info("Load critic function from {}".format(path))
-    #
-    # def load_state_value_fn(self, parameters_dir):
-    #     path = os.path.join(self.data_root, parameters_dir)
-    #     self.value_net.load_state_dict(torch.load(path, map_location=self.device))
-    #     self.logger.info("Load state value function from {}".format(path))
 
     def save(self):
         parameters_dir = self.parameters_dir

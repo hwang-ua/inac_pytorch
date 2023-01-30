@@ -199,7 +199,6 @@ class Agent:
         self.episode_reward += reward
         self.total_steps += 1
         self.ep_steps += 1
-        # print(self.ep_steps, self.total_steps, done)
         if done or self.ep_steps == self.timeout:
             self.episode_rewards.append(self.episode_reward)
             self.num_episodes += 1
@@ -293,7 +292,6 @@ class Agent:
 
     def log_file(self, elapsed_time=-1, test=True):
         mean, median, min_, max_ = self.log_return(self.ep_returns_queue_train, "TRAIN", elapsed_time)
-        # self.populate_returns()
         if test:
             self.populate_states, self.populate_actions, self.populate_true_qs = self.populate_returns(log_traj=True)
             self.populate_latest = True

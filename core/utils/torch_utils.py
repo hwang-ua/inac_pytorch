@@ -1,5 +1,4 @@
 import os
-
 import numpy as np
 import torch
 
@@ -12,7 +11,6 @@ def tensor(x, device):
 
 def to_np(t):
     return t.cpu().detach().numpy()
-
 
 def random_seed(seed):
     np.random.seed(seed)

@@ -22,10 +22,8 @@ class MLPCont(nn.Module):
         self.max_log_std = 0
         self.action_range = action_range
 
+    """https://github.com/hari-sikchi/AWAC/blob/3ad931ec73101798ffe82c62b19313a8607e4f1e/core.py#L91"""
     def forward(self, obs, deterministic=False):
-        """
-        https://github.com/hari-sikchi/AWAC/blob/3ad931ec73101798ffe82c62b19313a8607e4f1e/core.py#L91
-        """
         if not isinstance(obs, torch.Tensor): obs = torch_utils.tensor(obs, self.device)
         recover_size = False
         if len(obs.size()) == 1:
@@ -36,7 +34,6 @@ class MLPCont(nn.Module):
         mu = torch.tanh(mu) * self.action_range
 
         log_std = torch.sigmoid(self.log_std_logits)
-
         log_std = self.min_log_std + log_std * (self.max_log_std - self.min_log_std)
         std = torch.exp(log_std)
         pi_distribution = Normal(mu, std)
@@ -82,7 +79,6 @@ class MLPDiscrete(nn.Module):
     
     def forward(self, obs, deterministic=True):
         if not isinstance(obs, torch.Tensor): obs = torch_utils.tensor(obs, self.device)
-        # print("Using the special policy")
         recover_size = False
         if len(obs.size()) == 1:
             recover_size = True
