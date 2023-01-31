@@ -87,13 +87,8 @@ class InSampleAC(base.Agent):
 
         self.tau = tau
         self.polyak = polyak
-        # self.offline_learning = True
         self.fill_offline_data_to_buffer()
         self.offline_param_init()
-        # if self.offline_learning:
-        #     self.offline_param_init()
-        #     self.get_data = self.get_offline_data
-        #     self.feed_data = lambda : self.update_stats(0, None)
         return
 
 

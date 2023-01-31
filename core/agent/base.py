@@ -133,18 +133,6 @@ class Agent:
         self.tloss_increase = 0
         self.tloss_rec = np.inf
 
-    # def feed_data(self):
-    #     if self.reset is True:
-    #         self.state = self.env.reset()
-    #         self.reset = False
-    #     action = self.policy(self.state, eval=False)
-    #     next_state, reward, done, _ = self.env.step([action])
-    #     self.replay.feed([self.state, action, reward, next_state, int(done)])
-    #     prev_state = self.state
-    #     self.state = next_state
-    #     self.update_stats(reward, done)
-    #     return prev_state, action, reward, next_state, int(done)
-
     def get_data(self):
         states, actions, rewards, next_states, terminals = self.replay.sample()
         in_ = torch_utils.tensor(self.state_normalizer(states), self.device)
@@ -159,26 +147,6 @@ class Agent:
             'done': t
         }
         return data
-
-    # def get_offline_data(self):
-    #     train_s, train_a, train_r, train_ns, train_t = self.trainset
-    #     idxs = self.agent_rng.randint(0, len(train_s), size=self.batch_size) \
-    #         if self.batch_size < len(train_s) else np.arange(len(train_s))
-    #
-    #     in_ = torch_utils.tensor(self.state_normalizer(train_s[idxs]), self.device)
-    #     act = train_a[idxs]
-    #     r = torch_utils.tensor(train_r[idxs], self.device)
-    #     ns = torch_utils.tensor(self.state_normalizer(train_ns[idxs]), self.device)
-    #     t = torch_utils.tensor(train_t[idxs], self.device)
-    #
-    #     data = {
-    #         'obs': in_,
-    #         'act': act,
-    #         'reward': r,
-    #         'obs2': ns,
-    #         'done': t
-    #     }
-    #     return data
 
     def fill_offline_data_to_buffer(self):
         self.trainset = self.training_set_construction(self.offline_data)
