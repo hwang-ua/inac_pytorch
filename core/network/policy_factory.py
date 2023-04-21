@@ -42,7 +42,6 @@ class MLPCont(nn.Module):
         else:
             pi_action = pi_distribution.rsample()
         logp_pi = pi_distribution.log_prob(pi_action).sum(axis=-1)
-        logp_pi -= (2*(np.log(2) - pi_action - F.softplus(-2*pi_action))).sum(axis=1)
 
         if recover_size:
             pi_action, logp_pi = pi_action[0], logp_pi[0]
@@ -61,7 +60,6 @@ class MLPCont(nn.Module):
         std = torch.exp(log_std)
         pi_distribution = Normal(mu, std)
         logp_pi = pi_distribution.log_prob(actions).sum(axis=-1)
-        logp_pi -= (2*(np.log(2) - actions - F.softplus(-2*actions))).sum(axis=1)
         return logp_pi
 
 
